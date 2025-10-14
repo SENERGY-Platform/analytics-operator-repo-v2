@@ -1,7 +1,0 @@
-{
-  "debug": true,
-  "logger": {
-    "level": "debug"
-  },
-  "permissions_v2_url": "mock"
-}
