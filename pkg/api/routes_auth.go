@@ -21,4 +21,6 @@ import (
 	gin_mw "github.com/SENERGY-Platform/gin-middleware"
 )
 
-var routesAuth = gin_mw.Routes[service.Service]{}
+var routesAuth = gin_mw.Routes[service.Service]{
+	getAll,
+}

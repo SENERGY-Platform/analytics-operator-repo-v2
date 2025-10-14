@@ -17,14 +17,20 @@
 package db
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/lib"
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/pkg/util"
 	permV2Client "github.com/SENERGY-Platform/permissions-v2/pkg/client"
 	permV2Model "github.com/SENERGY-Platform/permissions-v2/pkg/model"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type OperatorRepository interface {
@@ -37,9 +43,10 @@ type OperatorRepository interface {
 
 type MongoRepo struct {
 	perm permV2Client.Client
+	coll *mongo.Collection
 }
 
-func NewMongoRepo(perm permV2Client.Client) *MongoRepo {
+func NewMongoRepo(perm permV2Client.Client, coll *mongo.Collection) *MongoRepo {
 	_, err, _ := perm.SetTopic(permV2Client.InternalAdminToken, permV2Client.Topic{
 		Id: PermV2InstanceTopic,
 		DefaultPermissions: permV2Client.ResourcePermissions{
@@ -56,7 +63,7 @@ func NewMongoRepo(perm permV2Client.Client) *MongoRepo {
 	if err != nil {
 		return nil
 	}
-	return &MongoRepo{perm: perm}
+	return &MongoRepo{perm: perm, coll: coll}
 }
 
 func (r *MongoRepo) ValidateOperatorPermissions() (err error) {
@@ -81,7 +88,7 @@ func (r *MongoRepo) ValidateOperatorPermissions() (err error) {
 			GroupPermissions: map[string]permV2Client.PermissionsMap{},
 			RolePermissions:  map[string]permV2Model.PermissionsMap{},
 		}
-		operatorId := operator.Id
+		operatorId := operator.Id.Hex()
 		dbIds = append(dbIds, operatorId)
 		resource, ok := permResourceMap[operatorId]
 		if ok {
@@ -123,6 +130,93 @@ func (r *MongoRepo) DeleteOperator(id string, userId string, admin bool, auth st
 }
 
 func (r *MongoRepo) All(userId string, admin bool, args map[string][]string, auth string) (response lib.OperatorResponse, err error) {
+	opt := options.Find()
+	for arg, value := range args {
+		if arg == "limit" {
+			limit, _ := strconv.ParseInt(value[0], 10, 64)
+			opt.SetLimit(limit)
+		}
+		if arg == "offset" {
+			skip, _ := strconv.ParseInt(value[0], 10, 64)
+			opt.SetSkip(skip)
+		}
+		if arg == "order" {
+			ord := strings.Split(value[0], ":")
+			order := 1
+			if ord[1] == "desc" {
+				order = -1
+			}
+			opt.SetSort(bson.M{ord[0]: int64(order)})
+		}
+	}
+
+	var req = bson.M{}
+	ids := []bson.ObjectID{}
+	var stringIds []string
+	if !admin {
+		stringIds, err, _ = r.perm.ListAccessibleResourceIds(auth, PermV2InstanceTopic, permV2Client.ListOptions{}, permV2Client.Read)
+		if err != nil {
+			return
+		}
+		for _, id := range stringIds {
+			objID, err := bson.ObjectIDFromHex(id)
+			if err != nil {
+				return lib.OperatorResponse{}, err
+			}
+			ids = append(ids, objID)
+		}
+		req = bson.M{
+			"$or": []interface{}{
+				bson.M{"_id": bson.M{"$in": ids}},
+				bson.M{"userId": userId},
+			}}
+		if val, ok := args["search"]; ok {
+			req = bson.M{
+				"name": bson.M{"$regex": val[0]},
+				"$or": []interface{}{
+					bson.M{"_id": bson.M{"$in": ids}},
+					bson.M{"userId": userId},
+				}}
+		}
+	}
+	cur, err := r.coll.Find(context.TODO(), req, opt)
+	if err != nil {
+		util.Logger.Error("error on query", "error", err)
+		return
+	}
+
+	req = bson.M{}
+	if !admin {
+		req = bson.M{
+			"$or": []interface{}{
+				bson.M{"_id": bson.M{"$in": ids}},
+				bson.M{"userId": userId},
+			}}
+		if val, ok := args["search"]; ok {
+			req = bson.M{
+				"name": bson.M{"$regex": val[0]},
+				"$or": []interface{}{
+					bson.M{"_id": bson.M{"$in": ids}},
+					bson.M{"userId": userId},
+				}}
+		}
+	}
+
+	response.Total, err = r.coll.CountDocuments(context.TODO(), req)
+	if err != nil {
+		util.Logger.Error("error on CountDocuments", "error", err)
+		return
+	}
+	response.Operators = make([]lib.Operator, 0)
+	for cur.Next(context.TODO()) {
+		// create a value into which the single document can be decoded
+		var elem lib.Operator
+		err = cur.Decode(&elem)
+		if err != nil {
+			return
+		}
+		response.Operators = append(response.Operators, elem)
+	}
 	return
 }
 

@@ -17,6 +17,7 @@
 package service
 
 import (
+	"github.com/SENERGY-Platform/analytics-operator-repo-v2/lib"
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/pkg/db"
 	srv_info_hdl "github.com/SENERGY-Platform/go-service-base/srv-info-hdl"
 	permV2Client "github.com/SENERGY-Platform/permissions-v2/pkg/client"
@@ -27,11 +28,15 @@ type Service struct {
 	dbRepo     db.OperatorRepository
 }
 
-func New(srvInfoHdl srv_info_hdl.Handler, perm permV2Client.Client) (*Service, error) {
-	dbRepo := db.NewMongoRepo(perm)
+func New(srvInfoHdl srv_info_hdl.Handler, perm permV2Client.Client, database db.MongoDB) (*Service, error) {
+	dbRepo := db.NewMongoRepo(perm, database.OperatorCollection())
 	err := dbRepo.ValidateOperatorPermissions()
 	return &Service{
 		srvInfoHdl: srvInfoHdl,
 		dbRepo:     dbRepo,
 	}, err
+}
+
+func (s *Service) GetOperators(userId string, args map[string][]string, auth string) (response lib.OperatorResponse, err error) {
+	return s.dbRepo.All(userId, false, args, auth)
 }

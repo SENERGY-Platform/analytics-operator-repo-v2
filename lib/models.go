@@ -16,17 +16,28 @@
 
 package lib
 
+import "go.mongodb.org/mongo-driver/v2/bson"
+
 type OperatorResponse struct {
 	Operators []Operator `json:"operators"`
-	Total     int        `json:"totalCount"`
+	Total     int64      `json:"totalCount"`
 }
 
 type Operator struct {
-	Id             string `json:"_id"`
-	Name           string `json:"name"`
-	Image          string `json:"image"`
-	Description    string `json:"description"`
-	DeploymentType string `json:"deploymentType"`
-	Cost           *int64 `json:"cost"`
-	UserId         string `json:"userId"`
+	Id             bson.ObjectID `bson:"_id" json:"_id"`
+	Name           string        `json:"name"`
+	Image          string        `json:"image"`
+	Description    string        `json:"description"`
+	DeploymentType string        `json:"deploymentType"`
+	Cost           *int64        `json:"cost"`
+	UserId         string        `json:"userId"`
+	Pub            bool          `json:"pub"`
+	Config         []Value       `json:"config_values"`
+	Inputs         []Value       `json:"inputs"`
+	Outputs        []Value       `json:"outputs"`
+}
+
+type Value struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
 }

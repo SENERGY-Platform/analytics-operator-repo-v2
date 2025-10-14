@@ -62,17 +62,17 @@ func main() {
 	util.Logger.Info(srvInfoHdl.Name(), "version", srvInfoHdl.Version())
 	util.Logger.Info("config: " + sb_util.ToJsonStr(cfg))
 
-	err = db.InitDB(cfg.MongoUrl)
+	ctx, cf := context.WithCancel(context.Background())
+	var perm permV2Client.Client
+
+	database, err := db.New(cfg.MongoUrl)
 	if err != nil {
 		util.Logger.Error("error on db init", "error", err)
 		ec = 1
 		return
 	}
 	util.Logger.Debug("connected to database")
-	defer db.CloseDB()
-
-	ctx, cf := context.WithCancel(context.Background())
-	var perm permV2Client.Client
+	defer database.Disconnect(ctx)
 
 	if cfg.PermissionsV2Url == "mock" {
 		util.Logger.Debug("using mock permissions")
@@ -81,7 +81,7 @@ func main() {
 		perm = permV2Client.New(cfg.PermissionsV2Url)
 	}
 
-	srv, err := service.New(*srvInfoHdl, perm)
+	srv, err := service.New(*srvInfoHdl, perm, *database)
 	if err != nil {
 		util.Logger.Error("error on new service", "error", err)
 		ec = 1

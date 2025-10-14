@@ -22,32 +22,35 @@ import (
 
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/lib"
 	permV2Client "github.com/SENERGY-Platform/permissions-v2/pkg/client"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-var DB *mongo.Client
-var CTX mongo.SessionContext
-
-func InitDB(url string) (err error) {
-	CTX, _ := context.WithTimeout(context.Background(), 10*time.Second)
-	client, err := mongo.Connect(CTX, options.Client().ApplyURI("mongodb://"+url))
-	if err != nil {
-		return
-	}
-	DB = client
-	return
+type MongoDB struct {
+	url    string
+	client *mongo.Client
 }
 
-func Mongo() *mongo.Collection {
-	return DB.Database("db").Collection("operators")
+func New(url string) (*MongoDB, error) {
+	client, err := mongo.Connect(options.Client().ApplyURI("mongodb://" + url))
+	if err != nil {
+		return nil, err
+	}
+	return &MongoDB{
+		url:    url,
+		client: client,
+	}, nil
 }
 
-func CloseDB() {
-	err := DB.Disconnect(CTX)
-	if err != nil {
-		panic("failed to disconnect database: " + err.Error())
+func (db *MongoDB) Disconnect(ctx context.Context) {
+	timeout, _ := getTimeoutContext(ctx)
+	if err := db.client.Disconnect(timeout); err != nil {
+		panic(err)
 	}
+}
+
+func (db *MongoDB) OperatorCollection() *mongo.Collection {
+	return db.client.Database("db").Collection("operators")
 }
 
 func SetDefaultPermissions(instance lib.Operator, permissions permV2Client.ResourcePermissions) {
@@ -57,4 +60,8 @@ func SetDefaultPermissions(instance lib.Operator, permissions permV2Client.Resou
 		Execute:      true,
 		Administrate: true,
 	}
+}
+
+func getTimeoutContext(basectx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(basectx, 10*time.Second)
 }
