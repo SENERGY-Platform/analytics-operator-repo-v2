@@ -23,4 +23,6 @@ import (
 
 var routesAuth = gin_mw.Routes[service.Service]{
 	getAll,
+	getOperator,
+	postOperator,
 }

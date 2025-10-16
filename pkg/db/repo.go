@@ -18,6 +18,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -121,11 +122,38 @@ func (r *MongoRepo) InsertOperator(operator lib.Operator) (err error) {
 	return
 }
 
-func (r *MongoRepo) UpdateOperator(id string, operator lib.Operator, userId string, auth string) (err error) {
+func (r *MongoRepo) DeleteOperator(id string, userId string, admin bool, auth string) (err error) {
 	return
 }
 
-func (r *MongoRepo) DeleteOperator(id string, userId string, admin bool, auth string) (err error) {
+func (r *MongoRepo) UpdateOperator(id string, operator lib.Operator, userId string, auth string) (err error) {
+	ok, err, _ := r.perm.CheckPermission(auth, PermV2InstanceTopic, id, permV2Client.Write)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New(MessageMissingRights)
+	}
+
+	objId, err := bson.ObjectIDFromHex(id)
+	if err != nil {
+		return
+	}
+	operator.Id = objId
+	res := r.coll.FindOneAndUpdate(context.TODO(), bson.M{"_id": objId}, bson.M{"$set": bson.M{
+		"name":           operator.Name,
+		"description":    operator.Description,
+		"image":          operator.Image,
+		"cost":           operator.Cost,
+		"deploymentType": operator.DeploymentType,
+		"pub":            operator.Pub,
+		"inputs":         operator.Inputs,
+		"outputs":        operator.Outputs,
+		"config_values":  operator.Config,
+	}})
+	if res.Err() != nil {
+		return res.Err()
+	}
 	return
 }
 
@@ -220,6 +248,21 @@ func (r *MongoRepo) All(userId string, admin bool, args map[string][]string, aut
 	return
 }
 
-func (r *MongoRepo) FindOperator(id string, userId string, auth string) (flow lib.Operator, err error) {
+func (r *MongoRepo) FindOperator(id string, userId string, auth string) (operator lib.Operator, err error) {
+	objID, err := bson.ObjectIDFromHex(id)
+	if err != nil {
+		return
+	}
+	ok, err, _ := r.perm.CheckPermission(auth, PermV2InstanceTopic, id, permV2Client.Read)
+	if err != nil {
+		return operator, err
+	}
+	if !ok {
+		return operator, errors.New(MessageMissingRights)
+	}
+	err = r.coll.FindOne(context.TODO(), bson.M{"_id": objID}).Decode(&operator)
+	if err != nil {
+		return
+	}
 	return
 }

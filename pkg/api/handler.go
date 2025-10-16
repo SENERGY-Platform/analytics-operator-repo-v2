@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/SENERGY-Platform/analytics-operator-repo-v2/lib"
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/pkg/service"
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/pkg/util"
 	"github.com/gin-gonic/gin"
@@ -44,6 +45,55 @@ func getAll(srv service.Service) (string, string, gin.HandlerFunc) {
 			return
 		}
 		gc.JSON(http.StatusOK, flows)
+	}
+}
+
+// getOperator godoc
+// @Summary Get operator
+// @Description	Gets a single operator
+// @Tags Operator
+// @Produce json
+// @Param id path string true "Operator ID"
+// @Success	200 {object} lib.Operator
+// @Failure	500 {string} str
+// @Router /operator/{id} [get]
+func getOperator(srv service.Service) (string, string, gin.HandlerFunc) {
+	return http.MethodGet, "/operator/:id", func(gc *gin.Context) {
+		resp, err := srv.GetOperator(gc.Param("id"), gc.GetString(UserIdKey), gc.GetHeader("Authorization"))
+		if err != nil {
+			util.Logger.Error("error getting operator", "error", err)
+			_ = gc.Error(errors.New(MessageSomethingWrong))
+			return
+		}
+		gc.JSON(http.StatusOK, resp)
+	}
+}
+
+// postOperator godoc
+// @Summary Update operator
+// @Description	Validates and updates an operator
+// @Tags Operator
+// @Accept json
+// @Param id path string true "Operator ID"
+// @Param operator body lib.Operator true "Update operator"
+// @Success	200
+// @Failure	500 {string} str
+// @Router /operator/{id} [post]
+func postOperator(srv service.Service) (string, string, gin.HandlerFunc) {
+	return http.MethodPost, "/operator/:id/", func(gc *gin.Context) {
+		var request lib.Operator
+		if err := gc.ShouldBindJSON(&request); err != nil {
+			util.Logger.Error("error updating operator", "error", err)
+			_ = gc.Error(errors.New(MessageSomethingWrong))
+			return
+		}
+		err := srv.UpdateOperator(gc.Param("id"), request, gc.GetString(UserIdKey), gc.GetHeader("Authorization"))
+		if err != nil {
+			util.Logger.Error("error updating operator", "error", err)
+			_ = gc.Error(errors.New(MessageSomethingWrong))
+			return
+		}
+		gc.Status(http.StatusOK)
 	}
 }
 

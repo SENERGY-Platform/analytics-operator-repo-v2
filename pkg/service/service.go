@@ -37,6 +37,14 @@ func New(srvInfoHdl srv_info_hdl.Handler, perm permV2Client.Client, database db.
 	}, err
 }
 
+func (s *Service) UpdateOperator(id string, operator lib.Operator, userId string, auth string) (err error) {
+	return s.dbRepo.UpdateOperator(id, operator, userId, auth)
+}
+
 func (s *Service) GetOperators(userId string, args map[string][]string, auth string) (response lib.OperatorResponse, err error) {
 	return s.dbRepo.All(userId, false, args, auth)
+}
+
+func (s *Service) GetOperator(id string, userId string, auth string) (response lib.Operator, err error) {
+	return s.dbRepo.FindOperator(id, userId, auth)
 }

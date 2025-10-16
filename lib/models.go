@@ -25,16 +25,16 @@ type OperatorResponse struct {
 
 type Operator struct {
 	Id             bson.ObjectID `bson:"_id" json:"_id"`
-	Name           string        `json:"name"`
-	Image          string        `json:"image"`
-	Description    string        `json:"description"`
-	DeploymentType string        `json:"deploymentType"`
-	Cost           *int64        `json:"cost"`
-	UserId         string        `json:"userId"`
-	Pub            bool          `json:"pub"`
-	Config         []Value       `json:"config_values"`
-	Inputs         []Value       `json:"inputs"`
-	Outputs        []Value       `json:"outputs"`
+	Name           string        `json:"name,omitempty" binding:"required"`
+	Image          string        `json:"image,omitempty"`
+	Description    string        `json:"description,omitempty"`
+	DeploymentType string        `bson:"deploymentType" json:"deploymentType,omitempty"`
+	Cost           *int64        `json:"cost,omitempty"`
+	UserId         string        `bson:"userId" json:"userId,omitempty"`
+	Pub            bool          `json:"pub,omitempty"`
+	Config         []Value       `bson:"config_values" json:"config_values,omitempty"`
+	Inputs         []Value       `json:"inputs,omitempty"`
+	Outputs        []Value       `json:"outputs,omitempty"`
 }
 
 type Value struct {
