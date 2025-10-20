@@ -16,7 +16,11 @@
 
 package lib
 
-import "go.mongodb.org/mongo-driver/v2/bson"
+import (
+	"time"
+
+	"go.mongodb.org/mongo-driver/v2/bson"
+)
 
 type OperatorResponse struct {
 	Operators []Operator `json:"operators"`
@@ -24,17 +28,19 @@ type OperatorResponse struct {
 }
 
 type Operator struct {
-	Id             bson.ObjectID `bson:"_id" json:"_id"`
-	Name           string        `json:"name,omitempty" binding:"required"`
-	Image          string        `json:"image,omitempty"`
-	Description    string        `json:"description,omitempty"`
-	DeploymentType string        `bson:"deploymentType" json:"deploymentType,omitempty"`
-	Cost           *int64        `json:"cost,omitempty"`
-	UserId         string        `bson:"userId" json:"userId,omitempty"`
-	Pub            bool          `json:"pub,omitempty"`
-	Config         []Value       `bson:"config_values" json:"config_values,omitempty"`
-	Inputs         []Value       `json:"inputs,omitempty"`
-	Outputs        []Value       `json:"outputs,omitempty"`
+	Id             *bson.ObjectID `bson:"_id,omitempty" json:"_id,omitempty"`
+	Name           string         `json:"name,omitempty" binding:"required"`
+	Image          string         `json:"image,omitempty"`
+	Description    string         `json:"description,omitempty"`
+	DeploymentType string         `bson:"deploymentType" json:"deploymentType,omitempty"`
+	Cost           *int64         `json:"cost,omitempty"`
+	UserId         string         `bson:"userId" json:"userId,omitempty"`
+	Pub            bool           `json:"pub,omitempty"`
+	Config         []Value        `bson:"config_values" json:"config_values,omitempty"`
+	Inputs         []Value        `json:"inputs,omitempty"`
+	Outputs        []Value        `json:"outputs,omitempty"`
+	DateCreated    time.Time      `bson:"dateCreated,omitempty" json:"dateCreated,omitempty"`
+	DateUpdated    time.Time      `bson:"dateUpdated,omitempty" json:"dateUpdated,omitempty"`
 }
 
 type Value struct {

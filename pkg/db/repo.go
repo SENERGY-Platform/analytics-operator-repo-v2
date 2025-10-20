@@ -24,6 +24,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/lib"
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/pkg/util"
@@ -38,6 +39,7 @@ type OperatorRepository interface {
 	InsertOperator(operator lib.Operator) (err error)
 	UpdateOperator(id string, operator lib.Operator, userId string, auth string) (err error)
 	DeleteOperator(id string, userId string, admin bool, auth string) (err error)
+	DeleteOperators(ids []string, userId string, admin bool, auth string) (err error)
 	All(userId string, admin bool, args map[string][]string, auth string) (response lib.OperatorResponse, err error)
 	FindOperator(id string, userId string, auth string) (flow lib.Operator, err error)
 }
@@ -119,10 +121,75 @@ func (r *MongoRepo) ValidateOperatorPermissions() (err error) {
 }
 
 func (r *MongoRepo) InsertOperator(operator lib.Operator) (err error) {
+	operator.DateCreated = time.Now()
+	operator.DateUpdated = time.Now()
+	permissions := permV2Client.ResourcePermissions{
+		GroupPermissions: map[string]permV2Client.PermissionsMap{},
+		UserPermissions:  map[string]permV2Client.PermissionsMap{},
+		RolePermissions:  map[string]permV2Model.PermissionsMap{},
+	}
+	SetDefaultPermissions(operator, permissions)
+	if operator.Id != nil {
+		operator.Id = nil
+	}
+	result, err := r.coll.InsertOne(context.TODO(), operator)
+	if err != nil {
+		return err
+	}
+
+	id := result.InsertedID.(bson.ObjectID).Hex()
+	_, err, _ = r.perm.SetPermission(permV2Client.InternalAdminToken, PermV2InstanceTopic, id, permissions)
 	return
 }
 
 func (r *MongoRepo) DeleteOperator(id string, userId string, admin bool, auth string) (err error) {
+	ok, err, _ := r.perm.CheckPermission(auth, PermV2InstanceTopic, id, permV2Client.Administrate)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New(MessageMissingRights)
+	}
+
+	objID, err := bson.ObjectIDFromHex(id)
+	if err != nil {
+		return
+	}
+	req := bson.M{"_id": objID}
+	res := r.coll.FindOneAndDelete(context.TODO(), req)
+	if res.Err() != nil {
+		return res.Err()
+	}
+	err, _ = r.perm.RemoveResource(auth, PermV2InstanceTopic, id)
+	return
+}
+
+func (r *MongoRepo) DeleteOperators(ids []string, userId string, admin bool, auth string) (err error) {
+	okArr, err, _ := r.perm.CheckMultiplePermissions(auth, PermV2InstanceTopic, ids, permV2Client.Administrate)
+	if err != nil {
+		return err
+	}
+	for id, ok := range okArr {
+		if !ok {
+			return errors.New(MessageMissingRights + " id: " + id)
+		}
+	}
+	var objID bson.ObjectID
+	for _, id := range ids {
+		objID, err = bson.ObjectIDFromHex(id)
+		if err != nil {
+			return
+		}
+		req := bson.M{"_id": objID}
+		res := r.coll.FindOneAndDelete(context.TODO(), req)
+		if res.Err() != nil {
+			return res.Err()
+		}
+		err, _ = r.perm.RemoveResource(auth, PermV2InstanceTopic, id)
+		if err != nil {
+			return
+		}
+	}
 	return
 }
 
@@ -139,7 +206,7 @@ func (r *MongoRepo) UpdateOperator(id string, operator lib.Operator, userId stri
 	if err != nil {
 		return
 	}
-	operator.Id = objId
+	operator.Id = &objId
 	res := r.coll.FindOneAndUpdate(context.TODO(), bson.M{"_id": objId}, bson.M{"$set": bson.M{
 		"name":           operator.Name,
 		"description":    operator.Description,

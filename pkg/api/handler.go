@@ -69,6 +69,33 @@ func getOperator(srv service.Service) (string, string, gin.HandlerFunc) {
 	}
 }
 
+// putOperator godoc
+// @Summary Create operator
+// @Description	Stores an operator
+// @Tags Operator
+// @Param operator body lib.Operator true "Create operator"
+// @Accept json
+// @Success	201
+// @Failure	500 {string} str
+// @Router /operator/ [put]
+func putOperator(srv service.Service) (string, string, gin.HandlerFunc) {
+	return http.MethodPut, "/operator/", func(gc *gin.Context) {
+		var request lib.Operator
+		if err := gc.ShouldBindJSON(&request); err != nil {
+			util.Logger.Error("error creating operator", "error", err)
+			_ = gc.Error(errors.New(MessageSomethingWrong))
+			return
+		}
+		err := srv.CreateOperator(request, gc.GetString(UserIdKey))
+		if err != nil {
+			util.Logger.Error("error creating operator", "error", err)
+			_ = gc.Error(errors.New(MessageSomethingWrong))
+			return
+		}
+		gc.Status(http.StatusCreated)
+	}
+}
+
 // postOperator godoc
 // @Summary Update operator
 // @Description	Validates and updates an operator
@@ -94,6 +121,54 @@ func postOperator(srv service.Service) (string, string, gin.HandlerFunc) {
 			return
 		}
 		gc.Status(http.StatusOK)
+	}
+}
+
+// deleteOperator godoc
+// @Summary Delete operator
+// @Description	Deletes an operator
+// @Tags Operator
+// @Param id path string true "Operator ID"
+// @Success	204
+// @Failure	500 {string} str
+// @Router /operator/{id} [delete]
+func deleteOperator(srv service.Service) (string, string, gin.HandlerFunc) {
+	return http.MethodDelete, "/operator/:id/", func(gc *gin.Context) {
+		err := srv.DeleteOperator(gc.Param("id"), gc.GetString(UserIdKey), gc.GetHeader("Authorization"))
+		if err != nil {
+			util.Logger.Error("error deleting operator", "error", err)
+			_ = gc.Error(errors.New(MessageSomethingWrong))
+			return
+		}
+		gc.Status(http.StatusNoContent)
+	}
+}
+
+// deleteOperators godoc
+// @Summary Delete multiple operators
+// @Description	Deletes multiple operators
+// @Tags Operator
+// @Accept json
+// @Param request body []string true "ID list"
+// @Success	204
+// @Failure	500 {string} str
+// @Router /operator [delete]
+func deleteOperators(srv service.Service) (string, string, gin.HandlerFunc) {
+	return http.MethodDelete, "/operator", func(gc *gin.Context) {
+		var request []string
+		if err := gc.ShouldBindJSON(&request); err != nil {
+			util.Logger.Error("error deleting operators", "error", err)
+			_ = gc.Error(errors.New(MessageSomethingWrong))
+			return
+		}
+
+		err := srv.DeleteOperators(request, gc.GetString(UserIdKey), gc.GetHeader("Authorization"))
+		if err != nil {
+			util.Logger.Error("error deleting operators", "error", err)
+			_ = gc.Error(errors.New(MessageSomethingWrong))
+			return
+		}
+		gc.Status(http.StatusNoContent)
 	}
 }
 

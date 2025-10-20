@@ -36,6 +36,75 @@
                         }
                     }
                 }
+            },
+            "delete": {
+                "description": "Deletes multiple operators",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Operator"
+                ],
+                "summary": "Delete multiple operators",
+                "parameters": [
+                    {
+                        "description": "ID list",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/operator/": {
+            "put": {
+                "description": "Stores an operator",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Operator"
+                ],
+                "summary": "Create operator",
+                "parameters": [
+                    {
+                        "description": "Create operator",
+                        "name": "operator",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/lib.Operator"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created"
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
             }
         },
         "/operator/{id}": {
@@ -110,6 +179,33 @@
                         }
                     }
                 }
+            },
+            "delete": {
+                "description": "Deletes an operator",
+                "tags": [
+                    "Operator"
+                ],
+                "summary": "Delete operator",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Operator ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
             }
         }
     },
@@ -131,6 +227,12 @@
                 },
                 "cost": {
                     "type": "integer"
+                },
+                "dateCreated": {
+                    "type": "string"
+                },
+                "dateUpdated": {
+                    "type": "string"
                 },
                 "deploymentType": {
                     "type": "string"

@@ -37,8 +37,21 @@ func New(srvInfoHdl srv_info_hdl.Handler, perm permV2Client.Client, database db.
 	}, err
 }
 
+func (s *Service) CreateOperator(operator lib.Operator, userId string) (err error) {
+	operator.UserId = userId
+	return s.dbRepo.InsertOperator(operator)
+}
+
 func (s *Service) UpdateOperator(id string, operator lib.Operator, userId string, auth string) (err error) {
 	return s.dbRepo.UpdateOperator(id, operator, userId, auth)
+}
+
+func (s *Service) DeleteOperator(id string, userId string, auth string) (err error) {
+	return s.dbRepo.DeleteOperator(id, userId, false, auth)
+}
+
+func (s *Service) DeleteOperators(ids []string, userId string, auth string) (err error) {
+	return s.dbRepo.DeleteOperators(ids, userId, false, auth)
 }
 
 func (s *Service) GetOperators(userId string, args map[string][]string, auth string) (response lib.OperatorResponse, err error) {

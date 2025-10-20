@@ -25,4 +25,7 @@ var routesAuth = gin_mw.Routes[service.Service]{
 	getAll,
 	getOperator,
 	postOperator,
+	putOperator,
+	deleteOperator,
+	deleteOperators,
 }
