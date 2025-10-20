@@ -38,7 +38,7 @@ import (
 	permV2Client "github.com/SENERGY-Platform/permissions-v2/pkg/client"
 )
 
-var version = "0.0.2"
+var version = "0.0.3"
 
 func main() {
 	srvInfoHdl := srv_info_hdl.New("analytics-operator-repo-v2", version)

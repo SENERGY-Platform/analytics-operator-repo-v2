@@ -38,10 +38,13 @@ type LoggerConfig struct {
 
 func New(path string) (*Config, error) {
 	cfg := Config{
-		ServerPort: 8000,
-		MongoUrl:   "localhost:27017",
-		Debug:      false,
-		Logger:     LoggerConfig{Level: "info"},
+		ServerPort:       8000,
+		MongoUrl:         "localhost:27017",
+		Debug:            false,
+		Logger:           LoggerConfig{Level: "info"},
+		HttpTimeout:      30 * time.Second,
+		PermissionsV2Url: "http://permv2.permissions:8080",
+		URLPrefix:        "",
 	}
 	err := sb_config_hdl.Load(&cfg, nil, envTypeParser, nil, path)
 	return &cfg, err
