@@ -227,6 +227,18 @@ func (r *MongoRepo) UpdateOperator(id string, operator lib.Operator, userId stri
 func (r *MongoRepo) All(userId string, admin bool, args map[string][]string, auth string) (response lib.OperatorResponse, err error) {
 	opt := options.Find()
 	for arg, value := range args {
+		if arg == "sort" {
+			ord := strings.Split(value[0], ":")
+			order := 1
+			if ord[1] == "desc" {
+				order = -1
+			}
+
+			sortFields := []string{"name"}
+			if slices.Contains(sortFields, ord[0]) {
+				opt.SetSort(bson.M{ord[0]: int64(order)})
+			}
+		}
 		if arg == "limit" {
 			limit, _ := strconv.ParseInt(value[0], 10, 64)
 			opt.SetLimit(limit)
@@ -234,14 +246,6 @@ func (r *MongoRepo) All(userId string, admin bool, args map[string][]string, aut
 		if arg == "offset" {
 			skip, _ := strconv.ParseInt(value[0], 10, 64)
 			opt.SetSkip(skip)
-		}
-		if arg == "order" {
-			ord := strings.Split(value[0], ":")
-			order := 1
-			if ord[1] == "desc" {
-				order = -1
-			}
-			opt.SetSort(bson.M{ord[0]: int64(order)})
 		}
 	}
 
@@ -280,37 +284,15 @@ func (r *MongoRepo) All(userId string, admin bool, args map[string][]string, aut
 		return
 	}
 
-	req = bson.M{}
-	if !admin {
-		req = bson.M{
-			"$or": []interface{}{
-				bson.M{"_id": bson.M{"$in": ids}},
-				bson.M{"userId": userId},
-			}}
-		if val, ok := args["search"]; ok {
-			req = bson.M{
-				"name": bson.M{"$regex": val[0]},
-				"$or": []interface{}{
-					bson.M{"_id": bson.M{"$in": ids}},
-					bson.M{"userId": userId},
-				}}
-		}
-	}
-
 	response.Total, err = r.coll.CountDocuments(context.TODO(), req)
 	if err != nil {
 		util.Logger.Error("error on CountDocuments", "error", err)
 		return
 	}
 	response.Operators = make([]lib.Operator, 0)
-	for cur.Next(context.TODO()) {
-		// create a value into which the single document can be decoded
-		var elem lib.Operator
-		err = cur.Decode(&elem)
-		if err != nil {
-			return
-		}
-		response.Operators = append(response.Operators, elem)
+	err = cur.All(context.TODO(), &response.Operators)
+	if err != nil {
+		return lib.OperatorResponse{}, err
 	}
 	return
 }
