@@ -160,7 +160,7 @@ func (r *MongoRepo) DeleteOperator(id string, userId string, admin bool, auth st
 	if res.Err() != nil {
 		return res.Err()
 	}
-	err, _ = r.perm.RemoveResource(auth, PermV2InstanceTopic, id)
+	err, _ = r.perm.RemoveResource(permV2Client.InternalAdminToken, PermV2InstanceTopic, id)
 	return
 }
 
@@ -185,7 +185,7 @@ func (r *MongoRepo) DeleteOperators(ids []string, userId string, admin bool, aut
 		if res.Err() != nil {
 			return res.Err()
 		}
-		err, _ = r.perm.RemoveResource(auth, PermV2InstanceTopic, id)
+		err, _ = r.perm.RemoveResource(permV2Client.InternalAdminToken, PermV2InstanceTopic, id)
 		if err != nil {
 			return
 		}
