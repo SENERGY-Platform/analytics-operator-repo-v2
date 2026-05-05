@@ -208,12 +208,6 @@ func (r *MongoRepo) UpdateOperator(id string, operator lib.Operator, userId stri
 	if err != nil {
 		return
 	}
-	operator.Id = &objId
-	version := int64(1)
-	if operator.Version != nil {
-		version = *operator.Version + 1
-	}
-	operator.Version = &version
 	res := r.coll.FindOneAndUpdate(context.TODO(), bson.M{"_id": objId}, bson.M{"$set": bson.M{
 		"name":           operator.Name,
 		"description":    operator.Description,
@@ -224,8 +218,9 @@ func (r *MongoRepo) UpdateOperator(id string, operator lib.Operator, userId stri
 		"inputs":         operator.Inputs,
 		"outputs":        operator.Outputs,
 		"config_values":  operator.Config,
-		"version":        operator.Version,
-	}})
+	},
+		"$inc": bson.M{"version": 1},
+	})
 	if res.Err() != nil {
 		return res.Err()
 	}
