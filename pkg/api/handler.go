@@ -59,7 +59,7 @@ func getAll(srv service.Service) (string, string, gin.HandlerFunc) {
 // @Router /operator/{id} [get]
 func getOperator(srv service.Service) (string, string, gin.HandlerFunc) {
 	return http.MethodGet, "/operator/:id", func(gc *gin.Context) {
-		resp, err := srv.GetOperator(gc.Param("id"), gc.GetString(UserIdKey), gc.GetHeader("Authorization"))
+		resp, err := srv.GetOperator(gc.Param("id"), gc.GetHeader("Authorization"))
 		if err != nil {
 			util.Logger.Error("error getting operator", "error", err)
 			_ = gc.Error(errors.New(MessageSomethingWrong))
@@ -114,7 +114,7 @@ func postOperator(srv service.Service) (string, string, gin.HandlerFunc) {
 			_ = gc.Error(errors.New(MessageSomethingWrong))
 			return
 		}
-		err := srv.UpdateOperator(gc.Param("id"), request, gc.GetString(UserIdKey), gc.GetHeader("Authorization"))
+		err := srv.UpdateOperator(gc.Param("id"), request, gc.GetHeader("Authorization"))
 		if err != nil {
 			util.Logger.Error("error updating operator", "error", err)
 			_ = gc.Error(errors.New(MessageSomethingWrong))
@@ -134,7 +134,7 @@ func postOperator(srv service.Service) (string, string, gin.HandlerFunc) {
 // @Router /operator/{id} [delete]
 func deleteOperator(srv service.Service) (string, string, gin.HandlerFunc) {
 	return http.MethodDelete, "/operator/:id/", func(gc *gin.Context) {
-		err := srv.DeleteOperator(gc.Param("id"), gc.GetString(UserIdKey), gc.GetHeader("Authorization"))
+		err := srv.DeleteOperator(gc.Param("id"), gc.GetHeader("Authorization"))
 		if err != nil {
 			util.Logger.Error("error deleting operator", "error", err)
 			_ = gc.Error(errors.New(MessageSomethingWrong))
@@ -162,7 +162,7 @@ func deleteOperators(srv service.Service) (string, string, gin.HandlerFunc) {
 			return
 		}
 
-		err := srv.DeleteOperators(request, gc.GetString(UserIdKey), gc.GetHeader("Authorization"))
+		err := srv.DeleteOperators(request, gc.GetHeader("Authorization"))
 		if err != nil {
 			util.Logger.Error("error deleting operators", "error", err)
 			_ = gc.Error(errors.New(MessageSomethingWrong))

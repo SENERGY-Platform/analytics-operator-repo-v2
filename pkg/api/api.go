@@ -40,7 +40,7 @@ import (
 // @license.name Apache-2.0
 // @license.url http://www.apache.org/licenses/LICENSE-2.0.html
 // @BasePath /
-func New(srv service.Service, staticHeader map[string]string, urlPrefix string) (*gin.Engine, error) {
+func New(srv service.Service, _, urlPrefix string) (*gin.Engine, error) {
 	gin.SetMode(gin.ReleaseMode)
 	httpHandler := gin.New()
 	httpHandler.RedirectTrailingSlash = false

@@ -37,11 +37,11 @@ import (
 
 type OperatorRepository interface {
 	InsertOperator(operator lib.Operator) (err error)
-	UpdateOperator(id string, operator lib.Operator, userId string, auth string) (err error)
-	DeleteOperator(id string, userId string, admin bool, auth string) (err error)
-	DeleteOperators(ids []string, userId string, admin bool, auth string) (err error)
+	UpdateOperator(id string, operator lib.Operator, auth string) (err error)
+	DeleteOperator(id string, auth string) (err error)
+	DeleteOperators(ids []string, auth string) (err error)
 	All(userId string, admin bool, args map[string][]string, auth string) (response lib.OperatorResponse, err error)
-	FindOperator(id string, userId string, auth string) (flow lib.Operator, err error)
+	FindOperator(id string, auth string) (flow lib.Operator, err error)
 }
 
 type MongoRepo struct {
@@ -144,7 +144,7 @@ func (r *MongoRepo) InsertOperator(operator lib.Operator) (err error) {
 	return
 }
 
-func (r *MongoRepo) DeleteOperator(id string, userId string, admin bool, auth string) (err error) {
+func (r *MongoRepo) DeleteOperator(id string, auth string) (err error) {
 	ok, err, _ := r.perm.CheckPermission(auth, PermV2InstanceTopic, id, permV2Client.Administrate)
 	if err != nil {
 		return err
@@ -166,7 +166,7 @@ func (r *MongoRepo) DeleteOperator(id string, userId string, admin bool, auth st
 	return
 }
 
-func (r *MongoRepo) DeleteOperators(ids []string, userId string, admin bool, auth string) (err error) {
+func (r *MongoRepo) DeleteOperators(ids []string, auth string) (err error) {
 	okArr, err, _ := r.perm.CheckMultiplePermissions(auth, PermV2InstanceTopic, ids, permV2Client.Administrate)
 	if err != nil {
 		return err
@@ -195,7 +195,7 @@ func (r *MongoRepo) DeleteOperators(ids []string, userId string, admin bool, aut
 	return
 }
 
-func (r *MongoRepo) UpdateOperator(id string, operator lib.Operator, userId string, auth string) (err error) {
+func (r *MongoRepo) UpdateOperator(id string, operator lib.Operator, auth string) (err error) {
 	ok, err, _ := r.perm.CheckPermission(auth, PermV2InstanceTopic, id, permV2Client.Write)
 	if err != nil {
 		return err
@@ -301,7 +301,7 @@ func (r *MongoRepo) All(userId string, admin bool, args map[string][]string, aut
 	return
 }
 
-func (r *MongoRepo) FindOperator(id string, userId string, auth string) (operator lib.Operator, err error) {
+func (r *MongoRepo) FindOperator(id string, auth string) (operator lib.Operator, err error) {
 	objID, err := bson.ObjectIDFromHex(id)
 	if err != nil {
 		return
