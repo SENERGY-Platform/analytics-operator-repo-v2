@@ -30,4 +30,5 @@ const (
 
 const (
 	MessageSomethingWrong = "something went wrong"
+	MessageUnauthorized   = "unauthorized"
 )

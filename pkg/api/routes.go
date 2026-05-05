@@ -25,3 +25,12 @@ var routes = gin_mw.Routes[service.Service]{
 	getHealthCheckH,
 	getSwaggerDocH,
 }
+
+var routesAuth = gin_mw.Routes[service.Service]{
+	getAll,
+	getOperator,
+	postOperator,
+	putOperator,
+	deleteOperator,
+	deleteOperators,
+}

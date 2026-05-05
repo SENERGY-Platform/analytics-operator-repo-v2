@@ -94,7 +94,8 @@ func AuthMiddleware() gin.HandlerFunc {
 		userId, err := getUserId(gc)
 		if err != nil {
 			util.Logger.Error("could not get user id")
-			gc.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			gc.String(http.StatusUnauthorized, MessageUnauthorized)
+			gc.Abort()
 			return
 		}
 		gc.Set(UserIdKey, userId)
