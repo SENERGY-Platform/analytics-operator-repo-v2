@@ -88,10 +88,7 @@ func main() {
 		return
 	}
 
-	httpHandler, err := api.New(*srv, map[string]string{
-		api.HeaderApiVer:  srvInfoHdl.Version(),
-		api.HeaderSrvName: srvInfoHdl.Name(),
-	}, cfg.URLPrefix)
+	httpHandler, err := api.New(*srv, cfg.URLPrefix)
 	if err != nil {
 		util.Logger.Error("error on new httpHandler", "error", err)
 		ec = 1
