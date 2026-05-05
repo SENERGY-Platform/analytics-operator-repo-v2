@@ -218,6 +218,7 @@ func (r *MongoRepo) UpdateOperator(id string, operator lib.Operator, userId stri
 		"inputs":         operator.Inputs,
 		"outputs":        operator.Outputs,
 		"config_values":  operator.Config,
+		"dateUpdated":    time.Now(),
 	},
 		"$inc": bson.M{"version": 1},
 	})
