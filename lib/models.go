@@ -39,6 +39,7 @@ type Operator struct {
 	Config         []Value        `bson:"config_values" json:"config_values,omitempty"`
 	Inputs         []Value        `json:"inputs,omitempty"`
 	Outputs        []Value        `json:"outputs,omitempty"`
+	Version        *int64         `bson:"version" json:"version,omitempty"`
 	DateCreated    time.Time      `bson:"dateCreated,omitempty" json:"dateCreated,omitempty"`
 	DateUpdated    time.Time      `bson:"dateUpdated,omitempty" json:"dateUpdated,omitempty"`
 }

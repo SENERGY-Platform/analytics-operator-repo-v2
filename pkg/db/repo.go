@@ -123,6 +123,8 @@ func (r *MongoRepo) ValidateOperatorPermissions() (err error) {
 func (r *MongoRepo) InsertOperator(operator lib.Operator) (err error) {
 	operator.DateCreated = time.Now()
 	operator.DateUpdated = time.Now()
+	version := int64(1)
+	operator.Version = &version
 	permissions := permV2Client.ResourcePermissions{
 		GroupPermissions: map[string]permV2Client.PermissionsMap{},
 		UserPermissions:  map[string]permV2Client.PermissionsMap{},
@@ -207,6 +209,11 @@ func (r *MongoRepo) UpdateOperator(id string, operator lib.Operator, userId stri
 		return
 	}
 	operator.Id = &objId
+	version := int64(1)
+	if operator.Version != nil {
+		version = *operator.Version + 1
+	}
+	operator.Version = &version
 	res := r.coll.FindOneAndUpdate(context.TODO(), bson.M{"_id": objId}, bson.M{"$set": bson.M{
 		"name":           operator.Name,
 		"description":    operator.Description,
@@ -217,6 +224,7 @@ func (r *MongoRepo) UpdateOperator(id string, operator lib.Operator, userId stri
 		"inputs":         operator.Inputs,
 		"outputs":        operator.Outputs,
 		"config_values":  operator.Config,
+		"version":        operator.Version,
 	}})
 	if res.Err() != nil {
 		return res.Err()
