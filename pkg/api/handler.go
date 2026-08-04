@@ -107,7 +107,17 @@ func putOperator(srv service.Service) (string, string, gin.HandlerFunc) {
 // @Failure	500 {string} str
 // @Router /operator/{id} [post]
 func postOperator(srv service.Service) (string, string, gin.HandlerFunc) {
-	return http.MethodPost, "/operator/:id/", func(gc *gin.Context) {
+	return http.MethodPost, "/operator/:id/", postOperatorHandler(srv)
+}
+
+// postOperatorAlias registers the path documented for postOperator. The
+// trailing-slash variant stays registered because released clients call it.
+func postOperatorAlias(srv service.Service) (string, string, gin.HandlerFunc) {
+	return http.MethodPost, "/operator/:id", postOperatorHandler(srv)
+}
+
+func postOperatorHandler(srv service.Service) gin.HandlerFunc {
+	return func(gc *gin.Context) {
 		var request lib.Operator
 		if err := gc.ShouldBindJSON(&request); err != nil {
 			util.Logger.Error("error updating operator", "error", err)
@@ -133,7 +143,17 @@ func postOperator(srv service.Service) (string, string, gin.HandlerFunc) {
 // @Failure	500 {string} str
 // @Router /operator/{id} [delete]
 func deleteOperator(srv service.Service) (string, string, gin.HandlerFunc) {
-	return http.MethodDelete, "/operator/:id/", func(gc *gin.Context) {
+	return http.MethodDelete, "/operator/:id/", deleteOperatorHandler(srv)
+}
+
+// deleteOperatorAlias registers the path documented for deleteOperator. The
+// trailing-slash variant stays registered because released clients call it.
+func deleteOperatorAlias(srv service.Service) (string, string, gin.HandlerFunc) {
+	return http.MethodDelete, "/operator/:id", deleteOperatorHandler(srv)
+}
+
+func deleteOperatorHandler(srv service.Service) gin.HandlerFunc {
+	return func(gc *gin.Context) {
 		err := srv.DeleteOperator(gc.Param("id"), gc.GetHeader("Authorization"))
 		if err != nil {
 			util.Logger.Error("error deleting operator", "error", err)
