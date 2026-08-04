@@ -232,15 +232,15 @@ func (r *MongoRepo) All(userId string, admin bool, args map[string][]string, aut
 	opt := options.Find()
 	for arg, value := range args {
 		if arg == "sort" {
-			ord := strings.Split(value[0], ":")
-			order := 1
-			if ord[1] == "desc" {
+			field, direction, _ := strings.Cut(value[0], ":")
+			order := int64(1)
+			if direction == "desc" {
 				order = -1
 			}
 
 			sortFields := []string{"name"}
-			if slices.Contains(sortFields, ord[0]) {
-				opt.SetSort(bson.M{ord[0]: int64(order)})
+			if slices.Contains(sortFields, field) {
+				opt.SetSort(bson.M{field: order})
 			}
 		}
 		if arg == "limit" {
