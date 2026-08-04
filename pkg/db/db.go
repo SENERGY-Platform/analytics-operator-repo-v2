@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/lib"
+	"github.com/SENERGY-Platform/analytics-operator-repo-v2/pkg/util"
+	"github.com/SENERGY-Platform/go-service-base/struct-logger/attributes"
 	permV2Client "github.com/SENERGY-Platform/permissions-v2/pkg/client"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -42,10 +44,13 @@ func New(url string) (*MongoDB, error) {
 	}, nil
 }
 
-func (db *MongoDB) Disconnect(ctx context.Context) {
-	timeout, _ := getTimeoutContext(ctx)
+// Disconnect uses its own deadline instead of inheriting one: it runs during
+// shutdown, when the callers' context is already cancelled.
+func (db *MongoDB) Disconnect() {
+	timeout, cf := getTimeoutContext(context.Background())
+	defer cf()
 	if err := db.client.Disconnect(timeout); err != nil {
-		panic(err)
+		util.Logger.Error("disconnecting from database failed", attributes.ErrorKey, err)
 	}
 }
 

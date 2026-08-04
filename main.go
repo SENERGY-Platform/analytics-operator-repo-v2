@@ -72,7 +72,7 @@ func main() {
 		return
 	}
 	util.Logger.Debug("connected to database")
-	defer database.Disconnect(ctx)
+	defer database.Disconnect()
 
 	if cfg.PermissionsV2Url == "mock" {
 		util.Logger.Debug("using mock permissions")
