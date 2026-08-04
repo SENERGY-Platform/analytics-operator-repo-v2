@@ -29,12 +29,17 @@ type Service struct {
 }
 
 func New(srvInfoHdl srv_info_hdl.Handler, perm permV2Client.Client, database db.MongoDB) (*Service, error) {
-	dbRepo := db.NewMongoRepo(perm, database.OperatorCollection())
-	err := dbRepo.ValidateOperatorPermissions()
+	dbRepo, err := db.NewMongoRepo(perm, database.OperatorCollection())
+	if err != nil {
+		return nil, err
+	}
+	if err = dbRepo.ValidateOperatorPermissions(); err != nil {
+		return nil, err
+	}
 	return &Service{
 		srvInfoHdl: srvInfoHdl,
 		dbRepo:     dbRepo,
-	}, err
+	}, nil
 }
 
 func (s *Service) CreateOperator(operator lib.Operator, userId string) (err error) {

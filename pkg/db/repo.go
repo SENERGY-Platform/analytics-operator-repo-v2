@@ -49,7 +49,7 @@ type MongoRepo struct {
 	coll *mongo.Collection
 }
 
-func NewMongoRepo(perm permV2Client.Client, coll *mongo.Collection) *MongoRepo {
+func NewMongoRepo(perm permV2Client.Client, coll *mongo.Collection) (*MongoRepo, error) {
 	_, err, _ := perm.SetTopic(permV2Client.InternalAdminToken, permV2Client.Topic{
 		Id: PermV2InstanceTopic,
 		DefaultPermissions: permV2Client.ResourcePermissions{
@@ -64,9 +64,9 @@ func NewMongoRepo(perm permV2Client.Client, coll *mongo.Collection) *MongoRepo {
 		},
 	})
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("set permissions topic: %w", err)
 	}
-	return &MongoRepo{perm: perm, coll: coll}
+	return &MongoRepo{perm: perm, coll: coll}, nil
 }
 
 func (r *MongoRepo) ValidateOperatorPermissions() (err error) {
