@@ -96,6 +96,11 @@ func (r *MongoRepo) ValidateOperatorPermissions() (err error) {
 		dbIds = append(dbIds, operatorId)
 		resource, ok := permResourceMap[operatorId]
 		if ok {
+			if ownerHasFullPermissions(resource, operator.UserId) {
+				// Already correct, and this runs for every operator on every
+				// start — writing it back would be a wasted round trip.
+				continue
+			}
 			permissions.UserPermissions = resource.ResourcePermissions.UserPermissions
 			permissions.GroupPermissions = resource.GroupPermissions
 			permissions.RolePermissions = resource.ResourcePermissions.RolePermissions
@@ -331,6 +336,13 @@ func (r *MongoRepo) FindOperator(id string, auth string) (operator lib.Operator,
 		return operator, notFound(err)
 	}
 	return
+}
+
+// ownerHasFullPermissions reports whether the owner already holds everything
+// SetDefaultPermissions would grant, so reconciliation can skip the write.
+func ownerHasFullPermissions(resource permV2Client.Resource, userId string) bool {
+	p, ok := resource.ResourcePermissions.UserPermissions[userId]
+	return ok && p.Read && p.Write && p.Execute && p.Administrate
 }
 
 // allOperatorOwners returns the id and owner of every operator. Reconciliation
