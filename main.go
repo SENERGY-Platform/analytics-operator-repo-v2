@@ -101,9 +101,16 @@ func main() {
 		bindAddress = "127.0.0.1:" + strconv.FormatInt(int64(cfg.ServerPort), 10)
 	}
 
+	// Without these an idle or deliberately slow client holds a connection open
+	// indefinitely. cfg.HttpTimeout has always existed for this and was unused.
 	httpServer := &http.Server{
-		Addr:    bindAddress,
-		Handler: httpHandler}
+		Addr:              bindAddress,
+		Handler:           httpHandler,
+		ReadHeaderTimeout: cfg.HttpTimeout,
+		ReadTimeout:       cfg.HttpTimeout,
+		WriteTimeout:      cfg.HttpTimeout,
+		IdleTimeout:       cfg.HttpTimeout,
+	}
 
 	go func() {
 		util.Wait(ctx, util.Logger, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
