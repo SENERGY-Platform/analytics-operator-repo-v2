@@ -84,7 +84,7 @@ func main() {
 		perm = permV2Client.New(cfg.PermissionsV2Url)
 	}
 
-	srv, err := service.New(*srvInfoHdl, perm, *database)
+	srv, err := service.New(perm, *database)
 	if err != nil {
 		util.Logger.Error("error on new service", "error", err)
 		ec.Store(1)

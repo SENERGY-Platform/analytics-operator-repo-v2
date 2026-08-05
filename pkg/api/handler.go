@@ -43,13 +43,13 @@ import (
 func getAll(srv service.Service) (string, string, gin.HandlerFunc) {
 	return http.MethodGet, "/operator", func(gc *gin.Context) {
 		args := gc.Request.URL.Query()
-		flows, err := srv.GetOperators(gc.GetString(UserIdKey), args, gc.GetHeader("Authorization"))
+		operators, err := srv.GetOperators(gc.GetString(UserIdKey), args, gc.GetHeader("Authorization"))
 		if err != nil {
 			util.Logger.Error("error getting operators", "error", err)
 			_ = gc.Error(safeError(err))
 			return
 		}
-		gc.JSON(http.StatusOK, flows)
+		gc.JSON(http.StatusOK, operators)
 	}
 }
 
