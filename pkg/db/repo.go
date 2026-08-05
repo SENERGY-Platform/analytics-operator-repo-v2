@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -275,7 +276,9 @@ func (r *MongoRepo) All(userId string, admin bool, args map[string][]string, aut
 			}}
 		if val, ok := args["search"]; ok {
 			req = bson.M{
-				"name": bson.M{"$regex": val[0]},
+				// QuoteMeta keeps the caller's input a literal substring: an
+				// unescaped value would let them run arbitrary regex on the server.
+				"name": bson.M{"$regex": regexp.QuoteMeta(val[0])},
 				"$or": []interface{}{
 					bson.M{"_id": bson.M{"$in": ids}},
 					bson.M{"userId": userId},
