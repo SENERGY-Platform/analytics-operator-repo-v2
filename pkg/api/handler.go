@@ -17,7 +17,7 @@
 package api
 
 import (
-	"errors"
+	"fmt"
 	"net/http"
 	"os"
 
@@ -32,7 +32,12 @@ import (
 // @Description	Gets all operators
 // @Tags Operator
 // @Produce json
+// @Param limit query int false "Maximum number of operators to return; also the default cap" default(1000)
+// @Param offset query int false "Number of operators to skip"
+// @Param sort query string false "Sort as field[:asc|desc]; only name is sortable" example(name:desc)
+// @Param search query string false "Case-sensitive substring match on name; treated literally"
 // @Success	200 {object} lib.OperatorResponse
+// @Failure	400 {string} str
 // @Failure	500 {string} str
 // @Router /operator [get]
 func getAll(srv service.Service) (string, string, gin.HandlerFunc) {
@@ -41,7 +46,7 @@ func getAll(srv service.Service) (string, string, gin.HandlerFunc) {
 		flows, err := srv.GetOperators(gc.GetString(UserIdKey), args, gc.GetHeader("Authorization"))
 		if err != nil {
 			util.Logger.Error("error getting operators", "error", err)
-			_ = gc.Error(errors.New(MessageSomethingWrong))
+			_ = gc.Error(safeError(err))
 			return
 		}
 		gc.JSON(http.StatusOK, flows)
@@ -55,6 +60,9 @@ func getAll(srv service.Service) (string, string, gin.HandlerFunc) {
 // @Produce json
 // @Param id path string true "Operator ID"
 // @Success	200 {object} lib.Operator
+// @Failure	400 {string} str
+// @Failure	403 {string} str
+// @Failure	404 {string} str
 // @Failure	500 {string} str
 // @Router /operator/{id} [get]
 func getOperator(srv service.Service) (string, string, gin.HandlerFunc) {
@@ -62,7 +70,7 @@ func getOperator(srv service.Service) (string, string, gin.HandlerFunc) {
 		resp, err := srv.GetOperator(gc.Param("id"), gc.GetHeader("Authorization"))
 		if err != nil {
 			util.Logger.Error("error getting operator", "error", err)
-			_ = gc.Error(errors.New(MessageSomethingWrong))
+			_ = gc.Error(safeError(err))
 			return
 		}
 		gc.JSON(http.StatusOK, resp)
@@ -76,6 +84,7 @@ func getOperator(srv service.Service) (string, string, gin.HandlerFunc) {
 // @Param operator body lib.Operator true "Create operator"
 // @Accept json
 // @Success	201
+// @Failure	400 {string} str
 // @Failure	500 {string} str
 // @Router /operator/ [put]
 func putOperator(srv service.Service) (string, string, gin.HandlerFunc) {
@@ -83,13 +92,13 @@ func putOperator(srv service.Service) (string, string, gin.HandlerFunc) {
 		var request lib.Operator
 		if err := gc.ShouldBindJSON(&request); err != nil {
 			util.Logger.Error("error creating operator", "error", err)
-			_ = gc.Error(errors.New(MessageSomethingWrong))
+			_ = gc.Error(fmt.Errorf("%w: malformed request body", lib.ErrInvalidInput))
 			return
 		}
 		err := srv.CreateOperator(request, gc.GetString(UserIdKey))
 		if err != nil {
 			util.Logger.Error("error creating operator", "error", err)
-			_ = gc.Error(errors.New(MessageSomethingWrong))
+			_ = gc.Error(safeError(err))
 			return
 		}
 		gc.Status(http.StatusCreated)
@@ -104,6 +113,9 @@ func putOperator(srv service.Service) (string, string, gin.HandlerFunc) {
 // @Param id path string true "Operator ID"
 // @Param operator body lib.Operator true "Update operator"
 // @Success	200
+// @Failure	400 {string} str
+// @Failure	403 {string} str
+// @Failure	404 {string} str
 // @Failure	500 {string} str
 // @Router /operator/{id} [post]
 func postOperator(srv service.Service) (string, string, gin.HandlerFunc) {
@@ -121,13 +133,13 @@ func postOperatorHandler(srv service.Service) gin.HandlerFunc {
 		var request lib.Operator
 		if err := gc.ShouldBindJSON(&request); err != nil {
 			util.Logger.Error("error updating operator", "error", err)
-			_ = gc.Error(errors.New(MessageSomethingWrong))
+			_ = gc.Error(fmt.Errorf("%w: malformed request body", lib.ErrInvalidInput))
 			return
 		}
 		err := srv.UpdateOperator(gc.Param("id"), request, gc.GetHeader("Authorization"))
 		if err != nil {
 			util.Logger.Error("error updating operator", "error", err)
-			_ = gc.Error(errors.New(MessageSomethingWrong))
+			_ = gc.Error(safeError(err))
 			return
 		}
 		gc.Status(http.StatusOK)
@@ -140,6 +152,9 @@ func postOperatorHandler(srv service.Service) gin.HandlerFunc {
 // @Tags Operator
 // @Param id path string true "Operator ID"
 // @Success	204
+// @Failure	400 {string} str
+// @Failure	403 {string} str
+// @Failure	404 {string} str
 // @Failure	500 {string} str
 // @Router /operator/{id} [delete]
 func deleteOperator(srv service.Service) (string, string, gin.HandlerFunc) {
@@ -157,7 +172,7 @@ func deleteOperatorHandler(srv service.Service) gin.HandlerFunc {
 		err := srv.DeleteOperator(gc.Param("id"), gc.GetHeader("Authorization"))
 		if err != nil {
 			util.Logger.Error("error deleting operator", "error", err)
-			_ = gc.Error(errors.New(MessageSomethingWrong))
+			_ = gc.Error(safeError(err))
 			return
 		}
 		gc.Status(http.StatusNoContent)
@@ -171,6 +186,9 @@ func deleteOperatorHandler(srv service.Service) gin.HandlerFunc {
 // @Accept json
 // @Param request body []string true "ID list"
 // @Success	204
+// @Failure	400 {string} str
+// @Failure	403 {string} str
+// @Failure	404 {string} str
 // @Failure	500 {string} str
 // @Router /operator [delete]
 func deleteOperators(srv service.Service) (string, string, gin.HandlerFunc) {
@@ -178,14 +196,14 @@ func deleteOperators(srv service.Service) (string, string, gin.HandlerFunc) {
 		var request []string
 		if err := gc.ShouldBindJSON(&request); err != nil {
 			util.Logger.Error("error deleting operators", "error", err)
-			_ = gc.Error(errors.New(MessageSomethingWrong))
+			_ = gc.Error(fmt.Errorf("%w: malformed request body", lib.ErrInvalidInput))
 			return
 		}
 
 		err := srv.DeleteOperators(request, gc.GetHeader("Authorization"))
 		if err != nil {
 			util.Logger.Error("error deleting operators", "error", err)
-			_ = gc.Error(errors.New(MessageSomethingWrong))
+			_ = gc.Error(safeError(err))
 			return
 		}
 		gc.Status(http.StatusNoContent)

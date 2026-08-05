@@ -72,7 +72,7 @@ func NewMongoRepo(perm permV2Client.Client, coll *mongo.Collection) (*MongoRepo,
 
 func (r *MongoRepo) ValidateOperatorPermissions() (err error) {
 	util.Logger.Debug("validate operator permissions")
-	resp, err := r.All("", true, map[string][]string{}, "")
+	operators, err := r.allOperatorOwners()
 	if err != nil {
 		return
 	}
@@ -86,7 +86,7 @@ func (r *MongoRepo) ValidateOperatorPermissions() (err error) {
 	}
 
 	dbIds := []string{}
-	for _, operator := range resp.Operators {
+	for _, operator := range operators {
 		permissions := permV2Client.ResourcePermissions{
 			UserPermissions:  map[string]permV2Client.PermissionsMap{},
 			GroupPermissions: map[string]permV2Client.PermissionsMap{},
@@ -151,17 +151,17 @@ func (r *MongoRepo) DeleteOperator(id string, auth string) (err error) {
 		return err
 	}
 	if !ok {
-		return errors.New(MessageMissingRights)
+		return lib.ErrMissingRights
 	}
 
-	objID, err := bson.ObjectIDFromHex(id)
+	objID, err := objectID(id)
 	if err != nil {
 		return
 	}
 	req := bson.M{"_id": objID}
 	res := r.coll.FindOneAndDelete(context.TODO(), req)
 	if res.Err() != nil {
-		return res.Err()
+		return notFound(res.Err())
 	}
 	err, _ = r.perm.RemoveResource(permV2Client.InternalAdminToken, PermV2InstanceTopic, id)
 	return
@@ -174,19 +174,19 @@ func (r *MongoRepo) DeleteOperators(ids []string, auth string) (err error) {
 	}
 	for id, ok := range okArr {
 		if !ok {
-			return errors.New(MessageMissingRights + " id: " + id)
+			return fmt.Errorf("%w: id %s", lib.ErrMissingRights, id)
 		}
 	}
 	var objID bson.ObjectID
 	for _, id := range ids {
-		objID, err = bson.ObjectIDFromHex(id)
+		objID, err = objectID(id)
 		if err != nil {
 			return
 		}
 		req := bson.M{"_id": objID}
 		res := r.coll.FindOneAndDelete(context.TODO(), req)
 		if res.Err() != nil {
-			return res.Err()
+			return notFound(res.Err())
 		}
 		err, _ = r.perm.RemoveResource(permV2Client.InternalAdminToken, PermV2InstanceTopic, id)
 		if err != nil {
@@ -202,10 +202,10 @@ func (r *MongoRepo) UpdateOperator(id string, operator lib.Operator, auth string
 		return err
 	}
 	if !ok {
-		return errors.New(MessageMissingRights)
+		return lib.ErrMissingRights
 	}
 
-	objId, err := bson.ObjectIDFromHex(id)
+	objId, err := objectID(id)
 	if err != nil {
 		return
 	}
@@ -224,13 +224,14 @@ func (r *MongoRepo) UpdateOperator(id string, operator lib.Operator, auth string
 		"$inc": bson.M{"version": 1},
 	})
 	if res.Err() != nil {
-		return res.Err()
+		return notFound(res.Err())
 	}
 	return
 }
 
 func (r *MongoRepo) All(userId string, admin bool, args map[string][]string, auth string) (response lib.OperatorResponse, err error) {
 	opt := options.Find()
+	limit := int64(MaxLimit)
 	for arg, value := range args {
 		if arg == "sort" {
 			field, direction, _ := strings.Cut(value[0], ":")
@@ -245,14 +246,23 @@ func (r *MongoRepo) All(userId string, admin bool, args map[string][]string, aut
 			}
 		}
 		if arg == "limit" {
-			limit, _ := strconv.ParseInt(value[0], 10, 64)
-			opt.SetLimit(limit)
+			limit, err = parseQueryInt(arg, value[0])
+			if err != nil {
+				return lib.OperatorResponse{}, err
+			}
+			if limit > MaxLimit {
+				return lib.OperatorResponse{}, fmt.Errorf("%w: limit exceeds maximum of %d", lib.ErrInvalidInput, MaxLimit)
+			}
 		}
 		if arg == "offset" {
-			skip, _ := strconv.ParseInt(value[0], 10, 64)
+			skip, skipErr := parseQueryInt(arg, value[0])
+			if skipErr != nil {
+				return lib.OperatorResponse{}, skipErr
+			}
 			opt.SetSkip(skip)
 		}
 	}
+	opt.SetLimit(limit)
 
 	var req = bson.M{}
 	ids := []bson.ObjectID{}
@@ -263,7 +273,7 @@ func (r *MongoRepo) All(userId string, admin bool, args map[string][]string, aut
 			return
 		}
 		for _, id := range stringIds {
-			objID, err := bson.ObjectIDFromHex(id)
+			objID, err := objectID(id)
 			if err != nil {
 				return lib.OperatorResponse{}, err
 			}
@@ -305,7 +315,7 @@ func (r *MongoRepo) All(userId string, admin bool, args map[string][]string, aut
 }
 
 func (r *MongoRepo) FindOperator(id string, auth string) (operator lib.Operator, err error) {
-	objID, err := bson.ObjectIDFromHex(id)
+	objID, err := objectID(id)
 	if err != nil {
 		return
 	}
@@ -314,11 +324,57 @@ func (r *MongoRepo) FindOperator(id string, auth string) (operator lib.Operator,
 		return operator, err
 	}
 	if !ok {
-		return operator, errors.New(MessageMissingRights)
+		return operator, lib.ErrMissingRights
 	}
 	err = r.coll.FindOne(context.TODO(), bson.M{"_id": objID}).Decode(&operator)
 	if err != nil {
-		return
+		return operator, notFound(err)
 	}
 	return
+}
+
+// allOperatorOwners returns the id and owner of every operator. Reconciliation
+// deletes permissions for ids it does not see, so it must see all of them — it
+// therefore bypasses All and the caller-facing MaxLimit cap by construction.
+// Only the two fields SetDefaultPermissions needs are read.
+func (r *MongoRepo) allOperatorOwners() ([]lib.Operator, error) {
+	opt := options.Find().SetProjection(bson.M{"_id": 1, "userId": 1})
+	cur, err := r.coll.Find(context.TODO(), bson.M{}, opt)
+	if err != nil {
+		return nil, err
+	}
+	operators := []lib.Operator{}
+	if err = cur.All(context.TODO(), &operators); err != nil {
+		return nil, err
+	}
+	return operators, nil
+}
+
+// objectID parses a caller-supplied id, reporting a malformed one as invalid
+// input rather than letting the driver's message reach the client.
+func objectID(id string) (bson.ObjectID, error) {
+	objID, err := bson.ObjectIDFromHex(id)
+	if err != nil {
+		return objID, fmt.Errorf("%w: malformed operator id", lib.ErrInvalidInput)
+	}
+	return objID, nil
+}
+
+// notFound maps the driver's empty-result error onto the API sentinel and
+// leaves every other error untouched.
+func notFound(err error) error {
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return lib.ErrNotFound
+	}
+	return err
+}
+
+// parseQueryInt accepts only non-negative integers; anything else is the
+// caller's mistake and must not silently fall back to a default.
+func parseQueryInt(arg string, raw string) (int64, error) {
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || v < 0 {
+		return 0, fmt.Errorf("%w: %s must be a non-negative integer", lib.ErrInvalidInput, arg)
+	}
+	return v, nil
 }

@@ -22,6 +22,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/SENERGY-Platform/analytics-operator-repo-v2/lib"
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/pkg/service"
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/pkg/util"
 	"github.com/SENERGY-Platform/go-service-base/struct-logger/attributes"
@@ -63,9 +64,7 @@ func New(srv service.Service, urlPrefix string) (*gin.Engine, error) {
 	)
 	middleware = append(middleware,
 		requestid.New(requestid.WithCustomHeaderStrKey(HeaderRequestID)),
-		gin_mw.ErrorHandler(func(err error) int {
-			return 0
-		}, ", "),
+		gin_mw.ErrorHandler(statusCode, ", "),
 		gin_mw.StructRecoveryHandler(util.Logger, gin_mw.DefaultRecoveryFunc),
 	)
 	httpHandler.Use(middleware...)
@@ -87,6 +86,31 @@ func New(srv service.Service, urlPrefix string) (*gin.Engine, error) {
 		util.Logger.Debug("http route", attributes.MethodKey, route[0], attributes.PathKey, route[1])
 	}
 	return httpHandler, nil
+}
+
+// statusCode maps the sentinels from lib onto HTTP statuses. Anything it does
+// not recognise stays a 500, which is what ErrorHandler defaults to.
+func statusCode(err error) int {
+	switch {
+	case errors.Is(err, lib.ErrInvalidInput):
+		return http.StatusBadRequest
+	case errors.Is(err, lib.ErrMissingRights):
+		return http.StatusForbidden
+	case errors.Is(err, lib.ErrNotFound):
+		return http.StatusNotFound
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+// safeError decides what the caller gets to read. ErrorHandler writes the error
+// text into the response body, so only the sentinels we built ourselves may pass
+// through; everything else could carry database or permission internals.
+func safeError(err error) error {
+	if errors.Is(err, lib.ErrInvalidInput) || errors.Is(err, lib.ErrMissingRights) || errors.Is(err, lib.ErrNotFound) {
+		return err
+	}
+	return errors.New(MessageSomethingWrong)
 }
 
 func AuthMiddleware() gin.HandlerFunc {

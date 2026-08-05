@@ -18,6 +18,6 @@ package db
 
 const PermV2InstanceTopic = "analytics-operators"
 
-const (
-	MessageMissingRights = "requested instance nonexistent or missing rights"
-)
+// MaxLimit caps how many operators a single query may return, and is also the
+// ceiling applied when the caller passes no limit at all.
+const MaxLimit = 1000
