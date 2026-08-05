@@ -24,6 +24,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -43,9 +44,11 @@ var version = "{version}"
 func main() {
 	srvInfoHdl := srv_info_hdl.New("analytics-operator-repo-v2", version)
 
-	ec := 0
+	// Written from the two server goroutines below as well as the startup path,
+	// so it cannot be a plain int.
+	var ec atomic.Int32
 	defer func() {
-		os.Exit(ec)
+		os.Exit(int(ec.Load()))
 	}()
 
 	config.ParseFlags()
@@ -53,7 +56,7 @@ func main() {
 	cfg, err := config.New(config.Flags.ConfPath)
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
-		ec = 1
+		ec.Store(1)
 		return
 	}
 
@@ -68,7 +71,7 @@ func main() {
 	database, err := db.New(cfg.MongoUrl)
 	if err != nil {
 		util.Logger.Error("error on db init", "error", err)
-		ec = 1
+		ec.Store(1)
 		return
 	}
 	util.Logger.Debug("connected to database")
@@ -84,14 +87,14 @@ func main() {
 	srv, err := service.New(*srvInfoHdl, perm, *database)
 	if err != nil {
 		util.Logger.Error("error on new service", "error", err)
-		ec = 1
+		ec.Store(1)
 		return
 	}
 
 	httpHandler, err := api.New(*srv, cfg.URLPrefix)
 	if err != nil {
 		util.Logger.Error("error on new httpHandler", "error", err)
-		ec = 1
+		ec.Store(1)
 		return
 	}
 
@@ -126,7 +129,7 @@ func main() {
 		util.Logger.Info("starting http server")
 		if err = httpServer.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			util.Logger.Error("starting server failed", attributes.ErrorKey, err)
-			ec = 1
+			ec.Store(1)
 		}
 		cf()
 	}()
@@ -140,7 +143,7 @@ func main() {
 		defer cf2()
 		if err := httpServer.Shutdown(ctxWt); err != nil {
 			util.Logger.Error("stopping server failed", attributes.ErrorKey, err)
-			ec = 1
+			ec.Store(1)
 		} else {
 			util.Logger.Info("http server stopped")
 		}
