@@ -27,6 +27,7 @@ type Config struct {
 	ServerPort       int           `json:"server_port" env_var:"SERVER_PORT"`
 	Logger           LoggerConfig  `json:"logger" env_var:"LOGGER_CONFIG"`
 	MongoUrl         string        `json:"mongo_url" env_var:"MONGO_URL"`
+	MongoDatabase    string        `json:"mongo_database" env_var:"MONGO_DATABASE"`
 	HttpTimeout      time.Duration `json:"http_timeout" env_var:"HTTP_TIMEOUT"`
 	PermissionsV2Url string        `json:"permissions_v2_url" env_var:"PERMISSIONS_V2_URL"`
 	URLPrefix        string        `json:"url_prefix" env_var:"URL_PREFIX"`
@@ -40,6 +41,7 @@ func New(path string) (*Config, error) {
 	cfg := Config{
 		ServerPort:       8000,
 		MongoUrl:         "localhost:27017",
+		MongoDatabase:    "db",
 		Debug:            false,
 		Logger:           LoggerConfig{Level: "info"},
 		HttpTimeout:      30 * time.Second,

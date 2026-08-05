@@ -18,30 +18,55 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/lib"
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/pkg/util"
 	"github.com/SENERGY-Platform/go-service-base/struct-logger/attributes"
 	permV2Client "github.com/SENERGY-Platform/permissions-v2/pkg/client"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type MongoDB struct {
-	url    string
-	client *mongo.Client
+	url      string
+	database string
+	client   *mongo.Client
 }
 
-func New(url string) (*MongoDB, error) {
+func New(url string, database string) (*MongoDB, error) {
 	client, err := mongo.Connect(options.Client().ApplyURI("mongodb://" + url))
 	if err != nil {
 		return nil, err
 	}
-	return &MongoDB{
-		url:    url,
-		client: client,
-	}, nil
+	db := &MongoDB{
+		url:      url,
+		database: database,
+		client:   client,
+	}
+	// Connect is lazy, so without a ping an unreachable database only surfaces
+	// on the first request — after the service has reported itself as started.
+	timeout, cf := getTimeoutContext(context.Background())
+	defer cf()
+	if err = client.Ping(timeout, nil); err != nil {
+		return nil, fmt.Errorf("ping database: %w", err)
+	}
+	if err = db.ensureIndexes(timeout); err != nil {
+		return nil, fmt.Errorf("create indexes: %w", err)
+	}
+	return db, nil
+}
+
+// ensureIndexes covers the two access patterns All relies on: sorting by name
+// and the owner term of the accessible-resources filter.
+func (db *MongoDB) ensureIndexes(ctx context.Context) error {
+	_, err := db.OperatorCollection().Indexes().CreateMany(ctx, []mongo.IndexModel{
+		{Keys: bson.D{{Key: "name", Value: 1}}},
+		{Keys: bson.D{{Key: "userId", Value: 1}}},
+	})
+	return err
 }
 
 // Disconnect uses its own deadline instead of inheriting one: it runs during
@@ -55,7 +80,7 @@ func (db *MongoDB) Disconnect() {
 }
 
 func (db *MongoDB) OperatorCollection() *mongo.Collection {
-	return db.client.Database("db").Collection("operators")
+	return db.client.Database(db.database).Collection("operators")
 }
 
 func SetDefaultPermissions(instance lib.Operator, permissions permV2Client.ResourcePermissions) {

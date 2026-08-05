@@ -68,7 +68,7 @@ func main() {
 	ctx, cf := context.WithCancel(context.Background())
 	var perm permV2Client.Client
 
-	database, err := db.New(cfg.MongoUrl)
+	database, err := db.New(cfg.MongoUrl, cfg.MongoDatabase)
 	if err != nil {
 		util.Logger.Error("error on db init", "error", err)
 		ec.Store(1)
