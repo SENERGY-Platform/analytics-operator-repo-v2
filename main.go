@@ -36,7 +36,6 @@ import (
 	"github.com/SENERGY-Platform/go-service-base/srv-info-hdl"
 	"github.com/SENERGY-Platform/go-service-base/struct-logger/attributes"
 	sb_util "github.com/SENERGY-Platform/go-service-base/util"
-	permV2Client "github.com/SENERGY-Platform/permissions-v2/pkg/client"
 )
 
 var version = "{version}"
@@ -66,7 +65,6 @@ func main() {
 	util.Logger.Info("config: " + sb_util.ToJsonStr(cfg))
 
 	ctx, cf := context.WithCancel(context.Background())
-	var perm permV2Client.Client
 
 	database, err := db.New(cfg.MongoUrl, cfg.MongoDatabase)
 	if err != nil {
@@ -77,14 +75,7 @@ func main() {
 	util.Logger.Debug("connected to database")
 	defer database.Disconnect()
 
-	if cfg.PermissionsV2Url == "mock" {
-		util.Logger.Debug("using mock permissions")
-		perm, err = permV2Client.NewTestClient(ctx)
-	} else {
-		perm = permV2Client.New(cfg.PermissionsV2Url)
-	}
-
-	srv, err := service.New(perm, *database)
+	srv, err := service.New(ctx, cfg.PermissionsV2Url, *database)
 	if err != nil {
 		util.Logger.Error("error on new service", "error", err)
 		ec.Store(1)

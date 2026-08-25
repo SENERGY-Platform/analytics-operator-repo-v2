@@ -17,8 +17,12 @@
 package service
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/lib"
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/pkg/db"
+	"github.com/SENERGY-Platform/analytics-operator-repo-v2/pkg/util"
 	permV2Client "github.com/SENERGY-Platform/permissions-v2/pkg/client"
 )
 
@@ -26,7 +30,14 @@ type Service struct {
 	dbRepo db.OperatorRepository
 }
 
-func New(perm permV2Client.Client, database db.MongoDB) (*Service, error) {
+// New builds the service together with the permissions-v2 client it needs. The
+// client is constructed here rather than handed in, because constructing it can
+// fail: the caller used to discard that error and carry on with a nil client.
+func New(ctx context.Context, permissionsUrl string, database db.MongoDB) (*Service, error) {
+	perm, err := newPermissionsClient(ctx, permissionsUrl)
+	if err != nil {
+		return nil, fmt.Errorf("permissions client: %w", err)
+	}
 	dbRepo, err := db.NewMongoRepo(perm, database.OperatorCollection())
 	if err != nil {
 		return nil, err
@@ -35,6 +46,23 @@ func New(perm permV2Client.Client, database db.MongoDB) (*Service, error) {
 		return nil, err
 	}
 	return &Service{dbRepo: dbRepo}, nil
+}
+
+// newPermissionsClient returns the client for the configured address. The literal
+// "mock" selects the in-process implementation, which is what a local run and the
+// tests use; anything else is treated as the address of a permissions-v2.
+func newPermissionsClient(ctx context.Context, url string) (permV2Client.Client, error) {
+	if url == "" {
+		// Refused here rather than accepted: a client built for an empty address
+		// fails on every request instead of at startup, where a misconfiguration
+		// is still cheap to read.
+		return nil, fmt.Errorf("no permissions-v2 address configured")
+	}
+	if url == "mock" {
+		util.Logger.Debug("using mock permissions")
+		return permV2Client.NewTestClient(ctx)
+	}
+	return permV2Client.New(url), nil
 }
 
 func (s *Service) CreateOperator(operator lib.Operator, userId string) (err error) {
