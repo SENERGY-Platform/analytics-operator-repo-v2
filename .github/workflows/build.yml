@@ -112,8 +112,14 @@ jobs:
         env:
           GITLEAKS_VERSION: 8.30.1
         run: |
-          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" |
-            tar -xz gitleaks
+          # Retried, and written to a file rather than piped into tar. A 502 from
+          # the release CDN has already failed a release once, and piping made it
+          # surface as "gzip: stdin: unexpected end of file" — which reads like a
+          # corrupt archive rather than a download that never finished.
+          curl -sSfL --retry 5 --retry-all-errors --retry-delay 5 \
+            -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf gitleaks.tar.gz gitleaks
           ./gitleaks detect --no-banner --redact --exit-code 1
 
   multi:
