@@ -1,0 +1,37 @@
+# Lint configuration for the `lint` quality gate.
+#
+# The line this draws: correctness blocks, style does not. A style rule that
+# fires on code following the platform's own conventions would either force this
+# repository to diverge from them or churn the gate tools under tools/, which are
+# copies of another repository's and have to stay comparable to it.
+version: "2"
+
+linters:
+  settings:
+    staticcheck:
+      checks:
+        - all
+        # ST* are style rules. ST1006 objects to `this` as a receiver name, which
+        # is the convention throughout the platform's own Go libraries — enforcing
+        # the opposite here buys nothing and costs consistency.
+        - -ST*
+        # QF* are quickfix suggestions ("could use a tagged switch", "could drop
+        # an embedded field from a selector"). Reasonable advice, not defects.
+        - -QF*
+    errcheck:
+      # Writes to an in-memory buffer or to stdout, and deferred cleanup: there is
+      # nothing to do with the error in either case. Every other unchecked error
+      # is a finding.
+      #
+      # (*os.File).Close is the one to watch. Closing a file that was only read
+      # cannot lose anything, which is the only way this repository closes a file
+      # today — there is no os.Create or os.OpenFile anywhere. On a file opened
+      # for writing the close error is the one that reports a failed flush, so a
+      # write path has to handle it explicitly; this exclusion will not remind
+      # anyone.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (*os.File).Close
+        - os.RemoveAll
