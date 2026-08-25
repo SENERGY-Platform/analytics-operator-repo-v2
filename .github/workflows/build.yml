@@ -15,15 +15,21 @@ jobs:
     runs-on: ubuntu-latest
     # mongo:4.2 is what the deployment runs, and it is also the lowest version
     # mongo-driver/v2 supports — testing against a newer server would test a
-    # configuration that is not deployed. The 4.2 image ships `mongo`, not
-    # `mongosh`.
+    # configuration that is not deployed. This tag is the single place to change
+    # when the deployment moves, and it has to move in the same change.
+    #
+    # The health check tries both shells because the image only ever has one:
+    # 4.2 ships the legacy `mongo`, and every image from 6.0 on ships `mongosh`
+    # instead. Written this way the check survives the version bump, so a server
+    # upgrade cannot fail here for a reason that has nothing to do with the
+    # server.
     services:
       mongo:
         image: mongo:4.2
         ports:
           - 27017:27017
         options: >-
-          --health-cmd "mongo --quiet --eval 'db.runCommand({ping:1}).ok'"
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok' || mongo --quiet --eval 'db.runCommand({ping:1}).ok'"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
