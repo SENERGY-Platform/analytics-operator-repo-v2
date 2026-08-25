@@ -7,7 +7,108 @@ on:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
 jobs:
+  # The gates a change has to clear before anything is released. `multi` waits on
+  # this job, so a failure here stops the tag bump and the image push rather than
+  # reporting after the fact. Modes and commands come from .claude/gates.env; the
+  # steps below are the enforcing half of the gates listed there as `enforce`.
+  checks:
+    runs-on: ubuntu-latest
+    # mongo:4.2 is what the deployment runs, and it is also the lowest version
+    # mongo-driver/v2 supports — testing against a newer server would test a
+    # configuration that is not deployed. The 4.2 image ships `mongo`, not
+    # `mongosh`.
+    services:
+      mongo:
+        image: mongo:4.2
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongo --quiet --eval 'db.runCommand({ping:1}).ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # gitleaks scans the commit range, which needs more than a shallow clone.
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: format
+        run: |
+          out=$(gofmt -l . | grep -v '^vendor/' || true)
+          if [ -n "$out" ]; then
+            echo "gofmt would reformat:"
+            echo "$out"
+            exit 1
+          fi
+      - name: lint
+        run: go vet ./...
+      - name: build
+        run: go build ./...
+      # REQUIRE_MONGO turns the integration tests' skip into a failure. Without it
+      # an unreachable database would leave the pipeline green while those tests
+      # never ran once.
+      - name: test
+        env:
+          MONGO_TEST_URL: localhost:27017
+          REQUIRE_MONGO: "1"
+        run: go test -race ./...
+      # Called through its install path rather than by name: whether GOPATH/bin is
+      # on PATH is a property of the runner image, not something setup-go promises,
+      # and a missing binary here would block the release for a reason that has
+      # nothing to do with a licence.
+      - name: deps_license
+        run: |
+          go install github.com/google/go-licenses@v1.6.0
+          "$(go env GOPATH)/bin/go-licenses" check ./... \
+            --allowed_licenses=MIT,Apache-2.0,BSD-3-Clause,BSD-2-Clause,BSD-2-Clause-FreeBSD,ISC
+      # Needs the database environment like the test gate: it runs the whole suite,
+      # and skipped integration tests would lower the figure for reasons unrelated
+      # to the change. fetch-depth: 0 above is what lets it resolve the base ref.
+      #
+      # The base ref has to be named explicitly. Left to its own resolution the tool
+      # picks main, which on a push to main is the commit being pushed — the changed
+      # set comes out empty and the gate passes without measuring anything. The SHA
+      # before the push is the correct base; a newly created ref reports all zeros,
+      # and a force push can name a commit this checkout does not have, so both fall
+      # back to the tool's own resolution rather than failing the release.
+      - name: coverage_delta
+        env:
+          MONGO_TEST_URL: localhost:27017
+          REQUIRE_MONGO: "1"
+          PUSHED_FROM: ${{ github.event.before }}
+        run: |
+          base="$PUSHED_FROM"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] ||
+             ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "no usable previous commit ($base), falling back to the default base ref"
+            base=""
+          fi
+          BASE_REF="$base" go run ./tools/coveragegate
+
+      # Same command the local gate runs. It fetches govulncheck through `go run`,
+      # so nothing has to be installed here, and it fails only on findings the
+      # criterion calls blocking — see tools/vulngate.
+      - name: vulns
+        run: go run ./tools/vulngate
+
+      # The gitleaks action requires a licence key for organisation-owned
+      # repositories, so the release binary is used directly. Version pinned so a
+      # new detection rule cannot turn a release red without a visible change.
+      - name: secrets
+        env:
+          GITLEAKS_VERSION: 8.30.1
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" |
+            tar -xz gitleaks
+          ./gitleaks detect --no-banner --redact --exit-code 1
+
   multi:
+    needs: checks
     runs-on: ubuntu-latest
     steps:
       -
