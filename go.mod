@@ -2,6 +2,12 @@ module github.com/SENERGY-Platform/analytics-operator-repo-v2
 
 go 1.25.0
 
+// Pins the Go distribution the build uses. Without it the released binary's
+// standard library is whatever the golang:1.26 tag resolves to on the day it is
+// built, which is nowhere in this repository; with it, that version is in the diff.
+// It is also what the vulns gate measures, so gate and artefact agree.
+toolchain go1.26.7
+
 require (
 	github.com/SENERGY-Platform/gin-middleware v0.14.1
 	github.com/SENERGY-Platform/go-service-base/config-hdl v1.2.0
