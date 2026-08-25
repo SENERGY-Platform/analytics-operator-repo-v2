@@ -31,3 +31,7 @@ go.work.sum
 .idea/
 # .vscode/
 config.json
+
+# Binaries of the gate tools, produced by `go build ./tools/<name>`
+/vulngate
+/coveragegate
