@@ -1,0 +1,12 @@
+# Text files use LF in the repository and in the working tree.
+#
+# Without this, a clone on a machine with core.autocrlf=true — the default of
+# Git for Windows, and a setting that also applies to a WSL checkout on that
+# machine — rewrites every file to CRLF. gofmt then reports every Go file as
+# needing reformatting, a rebase refuses to start because the tree looks dirty,
+# and any path-scoped tooling sees a change set of the whole repository. None of
+# that has a content difference behind it.
+#
+# core.autocrlf is per machine and has to be fixed once per person; this file is
+# per repository and holds for everyone who clones it.
+* text=auto eol=lf
