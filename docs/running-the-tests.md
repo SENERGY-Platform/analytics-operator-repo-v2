@@ -11,8 +11,6 @@ service without containers. That is possible for logic that sits above the
 database, and it is not what the tests here do — see the delimitation in the next
 section for why.
 
-`geltung: mehrfach`
-
 ## Two halves
 
     go test -race ./...

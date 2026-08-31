@@ -13,8 +13,6 @@ short-circuits, group resolution, the meaning of the individual permission flags
 That is the behaviour of a shared dependency and is not described here, because a
 copy of it in one consumer rots out of sync with the library.
 
-`geltung: einzelfall`
-
 ## One resource per operator
 
 Every operator is a resource in the topic `analytics-operators`, keyed by the

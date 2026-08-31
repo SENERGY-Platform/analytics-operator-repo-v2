@@ -11,8 +11,6 @@ platform. Several of them carry visibly copied code for the same endpoint, but
 the values differ — the cap, the sortable fields and the treatment of `limit=0`
 are each a local decision, and none of them can be assumed from here.
 
-`geltung: einzelfall`
-
 ## limit, and the value that means no limit
 
 - **Absent** — at most `MaxLimit` documents, currently **1000**. The cap applies
