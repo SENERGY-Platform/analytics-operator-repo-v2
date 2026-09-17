@@ -24,6 +24,7 @@ import (
 	"time"
 
 	structlogger "github.com/SENERGY-Platform/go-service-base/struct-logger"
+	"github.com/SENERGY-Platform/go-service-base/struct-logger/handlers"
 )
 
 var Logger *slog.Logger
@@ -51,5 +52,10 @@ func InitStructLogger(level string) {
 			org,
 			project,
 		)
+		// Wrapped outside the configured handler so level, time format and meta
+		// attributes still apply. Every *Context call whose context carries
+		// OpenTelemetry baggage now writes those entries as attributes and mirrors
+		// the record onto the active span; a plain call is unaffected.
+		Logger = slog.New(handlers.NewOpenTelemetryHandler(Logger.Handler()))
 	}
 }

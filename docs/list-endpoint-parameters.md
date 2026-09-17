@@ -19,7 +19,9 @@ are each a local decision, and none of them can be assumed from here.
 - **`0`** — **every** document, with no cap. MongoDB reads `limit: 0` as
   unlimited, and the code passes the parsed value straight through.
 - **Above the cap** — refused, not silently reduced:
-  `invalid request: limit exceeds maximum of 1000`.
+  `invalid request: limit exceeds maximum of 1000; use limit=0 for no limit`. The
+  message names the escape hatch because a client that wanted everything has no
+  way to guess it from a plain refusal.
 - **Negative or not a number** — refused:
   `invalid request: limit must be a non-negative integer`.
 

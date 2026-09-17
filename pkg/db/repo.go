@@ -37,12 +37,12 @@ import (
 )
 
 type OperatorRepository interface {
-	InsertOperator(operator lib.Operator) (err error)
-	UpdateOperator(id string, operator lib.Operator, auth string) (err error)
-	DeleteOperator(id string, auth string) (err error)
-	DeleteOperators(ids []string, auth string) (err error)
-	All(userId string, admin bool, args map[string][]string, auth string) (response lib.OperatorResponse, err error)
-	FindOperator(id string, auth string) (flow lib.Operator, err error)
+	InsertOperator(ctx context.Context, operator lib.Operator) (err error)
+	UpdateOperator(ctx context.Context, id string, operator lib.Operator, auth string) (err error)
+	DeleteOperator(ctx context.Context, id string, auth string) (err error)
+	DeleteOperators(ctx context.Context, ids []string, auth string) (err error)
+	All(ctx context.Context, userId string, admin bool, args map[string][]string, auth string) (response lib.OperatorResponse, err error)
+	FindOperator(ctx context.Context, id string, auth string) (flow lib.Operator, err error)
 }
 
 type MongoRepo struct {
@@ -70,9 +70,9 @@ func NewMongoRepo(perm permV2Client.Client, coll *mongo.Collection) (*MongoRepo,
 	return &MongoRepo{perm: perm, coll: coll}, nil
 }
 
-func (r *MongoRepo) ValidateOperatorPermissions() (err error) {
+func (r *MongoRepo) ValidateOperatorPermissions(ctx context.Context) (err error) {
 	util.Logger.Debug("validate operator permissions")
-	operators, err := r.allOperatorOwners()
+	operators, err := r.allOperatorOwners(ctx)
 	if err != nil {
 		return
 	}
@@ -126,7 +126,7 @@ func (r *MongoRepo) ValidateOperatorPermissions() (err error) {
 	return
 }
 
-func (r *MongoRepo) InsertOperator(operator lib.Operator) (err error) {
+func (r *MongoRepo) InsertOperator(ctx context.Context, operator lib.Operator) (err error) {
 	operator.DateCreated = time.Now()
 	operator.DateUpdated = time.Now()
 	version := int64(1)
@@ -140,7 +140,9 @@ func (r *MongoRepo) InsertOperator(operator lib.Operator) (err error) {
 	if operator.Id != nil {
 		operator.Id = nil
 	}
-	result, err := r.coll.InsertOne(context.TODO(), operator)
+	// Without the cancellation, with the trace: a client that hangs up mid-write
+	// would otherwise leave the document in place and the permission entry unwritten.
+	result, err := r.coll.InsertOne(context.WithoutCancel(ctx), operator)
 	if err != nil {
 		return err
 	}
@@ -150,7 +152,7 @@ func (r *MongoRepo) InsertOperator(operator lib.Operator) (err error) {
 	return
 }
 
-func (r *MongoRepo) DeleteOperator(id string, auth string) (err error) {
+func (r *MongoRepo) DeleteOperator(ctx context.Context, id string, auth string) (err error) {
 	ok, err, _ := r.perm.CheckPermission(auth, PermV2InstanceTopic, id, permV2Client.Administrate)
 	if err != nil {
 		return err
@@ -164,7 +166,8 @@ func (r *MongoRepo) DeleteOperator(id string, auth string) (err error) {
 		return
 	}
 	req := bson.M{"_id": objID}
-	res := r.coll.FindOneAndDelete(context.TODO(), req)
+	// See InsertOperator: the delete and the permission removal belong together.
+	res := r.coll.FindOneAndDelete(context.WithoutCancel(ctx), req)
 	if res.Err() != nil {
 		return notFound(res.Err())
 	}
@@ -172,7 +175,7 @@ func (r *MongoRepo) DeleteOperator(id string, auth string) (err error) {
 	return
 }
 
-func (r *MongoRepo) DeleteOperators(ids []string, auth string) (err error) {
+func (r *MongoRepo) DeleteOperators(ctx context.Context, ids []string, auth string) (err error) {
 	okArr, err, _ := r.perm.CheckMultiplePermissions(auth, PermV2InstanceTopic, ids, permV2Client.Administrate)
 	if err != nil {
 		return err
@@ -182,6 +185,9 @@ func (r *MongoRepo) DeleteOperators(ids []string, auth string) (err error) {
 			return fmt.Errorf("%w: id %s", lib.ErrMissingRights, id)
 		}
 	}
+	// One context for the whole batch: a client that hangs up halfway through must
+	// not leave part of the ids deleted and the rest standing.
+	ctx = context.WithoutCancel(ctx)
 	var objID bson.ObjectID
 	for _, id := range ids {
 		objID, err = objectID(id)
@@ -189,7 +195,7 @@ func (r *MongoRepo) DeleteOperators(ids []string, auth string) (err error) {
 			return
 		}
 		req := bson.M{"_id": objID}
-		res := r.coll.FindOneAndDelete(context.TODO(), req)
+		res := r.coll.FindOneAndDelete(ctx, req)
 		if res.Err() != nil {
 			return notFound(res.Err())
 		}
@@ -201,7 +207,7 @@ func (r *MongoRepo) DeleteOperators(ids []string, auth string) (err error) {
 	return
 }
 
-func (r *MongoRepo) UpdateOperator(id string, operator lib.Operator, auth string) (err error) {
+func (r *MongoRepo) UpdateOperator(ctx context.Context, id string, operator lib.Operator, auth string) (err error) {
 	ok, err, _ := r.perm.CheckPermission(auth, PermV2InstanceTopic, id, permV2Client.Write)
 	if err != nil {
 		return err
@@ -214,7 +220,7 @@ func (r *MongoRepo) UpdateOperator(id string, operator lib.Operator, auth string
 	if err != nil {
 		return
 	}
-	res := r.coll.FindOneAndUpdate(context.TODO(), bson.M{"_id": objId}, bson.M{"$set": bson.M{
+	res := r.coll.FindOneAndUpdate(context.WithoutCancel(ctx), bson.M{"_id": objId}, bson.M{"$set": bson.M{
 		"name":           operator.Name,
 		"description":    operator.Description,
 		"image":          operator.Image,
@@ -234,7 +240,7 @@ func (r *MongoRepo) UpdateOperator(id string, operator lib.Operator, auth string
 	return
 }
 
-func (r *MongoRepo) All(userId string, admin bool, args map[string][]string, auth string) (response lib.OperatorResponse, err error) {
+func (r *MongoRepo) All(ctx context.Context, userId string, admin bool, args map[string][]string, auth string) (response lib.OperatorResponse, err error) {
 	opt := options.Find()
 	limit := int64(MaxLimit)
 	for arg, value := range args {
@@ -256,7 +262,7 @@ func (r *MongoRepo) All(userId string, admin bool, args map[string][]string, aut
 				return lib.OperatorResponse{}, err
 			}
 			if limit > MaxLimit {
-				return lib.OperatorResponse{}, fmt.Errorf("%w: limit exceeds maximum of %d", lib.ErrInvalidInput, MaxLimit)
+				return lib.OperatorResponse{}, fmt.Errorf("%w: limit exceeds maximum of %d; use limit=0 for no limit", lib.ErrInvalidInput, MaxLimit)
 			}
 		}
 		if arg == "offset" {
@@ -300,26 +306,26 @@ func (r *MongoRepo) All(userId string, admin bool, args map[string][]string, aut
 				}}
 		}
 	}
-	cur, err := r.coll.Find(context.TODO(), req, opt)
+	cur, err := r.coll.Find(ctx, req, opt)
 	if err != nil {
 		util.Logger.Error("error on query", "error", err)
 		return
 	}
 
-	response.Total, err = r.coll.CountDocuments(context.TODO(), req)
+	response.Total, err = r.coll.CountDocuments(ctx, req)
 	if err != nil {
 		util.Logger.Error("error on CountDocuments", "error", err)
 		return
 	}
 	response.Operators = make([]lib.Operator, 0)
-	err = cur.All(context.TODO(), &response.Operators)
+	err = cur.All(ctx, &response.Operators)
 	if err != nil {
 		return lib.OperatorResponse{}, err
 	}
 	return
 }
 
-func (r *MongoRepo) FindOperator(id string, auth string) (operator lib.Operator, err error) {
+func (r *MongoRepo) FindOperator(ctx context.Context, id string, auth string) (operator lib.Operator, err error) {
 	objID, err := objectID(id)
 	if err != nil {
 		return
@@ -331,7 +337,7 @@ func (r *MongoRepo) FindOperator(id string, auth string) (operator lib.Operator,
 	if !ok {
 		return operator, lib.ErrMissingRights
 	}
-	err = r.coll.FindOne(context.TODO(), bson.M{"_id": objID}).Decode(&operator)
+	err = r.coll.FindOne(ctx, bson.M{"_id": objID}).Decode(&operator)
 	if err != nil {
 		return operator, notFound(err)
 	}
@@ -349,14 +355,14 @@ func ownerHasFullPermissions(resource permV2Client.Resource, userId string) bool
 // deletes permissions for ids it does not see, so it must see all of them — it
 // therefore bypasses All and the caller-facing MaxLimit cap by construction.
 // Only the two fields SetDefaultPermissions needs are read.
-func (r *MongoRepo) allOperatorOwners() ([]lib.Operator, error) {
+func (r *MongoRepo) allOperatorOwners(ctx context.Context) ([]lib.Operator, error) {
 	opt := options.Find().SetProjection(bson.M{"_id": 1, "userId": 1})
-	cur, err := r.coll.Find(context.TODO(), bson.M{}, opt)
+	cur, err := r.coll.Find(ctx, bson.M{}, opt)
 	if err != nil {
 		return nil, err
 	}
 	operators := []lib.Operator{}
-	if err = cur.All(context.TODO(), &operators); err != nil {
+	if err = cur.All(ctx, &operators); err != nil {
 		return nil, err
 	}
 	return operators, nil

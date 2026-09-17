@@ -31,6 +31,10 @@ type Config struct {
 	HttpTimeout      time.Duration `json:"http_timeout" env_var:"HTTP_TIMEOUT"`
 	PermissionsV2Url string        `json:"permissions_v2_url" env_var:"PERMISSIONS_V2_URL"`
 	URLPrefix        string        `json:"url_prefix" env_var:"URL_PREFIX"`
+	// OtelEndpoint is the OTLP collector traces are exported to. Empty means the
+	// in-cluster Jaeger the otelx default names, which is what every deployment
+	// uses; it is set explicitly only to export somewhere else.
+	OtelEndpoint string `json:"otel_endpoint" env_var:"OTEL_ENDPOINT"`
 }
 
 type LoggerConfig struct {
@@ -47,6 +51,7 @@ func New(path string) (*Config, error) {
 		HttpTimeout:      30 * time.Second,
 		PermissionsV2Url: "http://permv2.permissions:8080",
 		URLPrefix:        "",
+		OtelEndpoint:     "",
 	}
 	err := sb_config_hdl.Load(&cfg, nil, envTypeParser, nil, path)
 	return &cfg, err

@@ -16,6 +16,10 @@
 
 package api
 
+// ServiceName labels the spans and the exporter resource. It is the module name,
+// which is what the collector is queried by.
+const ServiceName = "analytics-operator-repo-v2"
+
 const (
 	HeaderRequestID     = "X-Request-ID"
 	HeaderAuthorization = "Authorization"

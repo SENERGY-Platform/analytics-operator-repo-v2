@@ -16,8 +16,8 @@ github.com/SENERGY-Platform/go-service-base/config-hdl v1.2.0 h1:OST21YZ0/Or10Ey
 github.com/SENERGY-Platform/go-service-base/config-hdl v1.2.0/go.mod h1:+YKSlnOc5NNeZuVA5HE8hmrKCRQwb5FlMvgmpMw2FWk=
 github.com/SENERGY-Platform/go-service-base/srv-info-hdl v0.2.0 h1:EQbMcWBVgzArb/OJi0LbNXcE48oIRWngw0ChnWzd8KM=
 github.com/SENERGY-Platform/go-service-base/srv-info-hdl v0.2.0/go.mod h1:mgNdIRGzrn3Vey2d0j/OtGSt8APIp5Io54MD80UorPs=
-github.com/SENERGY-Platform/go-service-base/struct-logger v0.8.0 h1:CxfCO1t2ADa0mHjm2BM/Owev0489V+jMmcRbFiOAxNY=
-github.com/SENERGY-Platform/go-service-base/struct-logger v0.8.0/go.mod h1:kvsSQEb3MU78D+Sepf39nTmLcIJiO4FeFwlcdYZ/PyU=
+github.com/SENERGY-Platform/go-service-base/struct-logger v0.8.1 h1:WmoRVZKRHDDkB1k1dbYorozEy9jYtddCnX4dgHLI2QQ=
+github.com/SENERGY-Platform/go-service-base/struct-logger v0.8.1/go.mod h1:kvsSQEb3MU78D+Sepf39nTmLcIJiO4FeFwlcdYZ/PyU=
 github.com/SENERGY-Platform/go-service-base/util v1.1.0 h1:dsfWSfv+k0xr1kgasjIfw1UrvYL2G4QUmMvEwwNJi7c=
 github.com/SENERGY-Platform/go-service-base/util v1.1.0/go.mod h1:/gs/BaaSNwC+jbjsSgWDPoeMhfq8uJsf0WVQtyjP+wM=
 github.com/SENERGY-Platform/permissions-v2 v0.0.45 h1:o8w+6zA8lRH00fXYxrMs2EEX9vR5BSO7T+e3dJXbwhI=

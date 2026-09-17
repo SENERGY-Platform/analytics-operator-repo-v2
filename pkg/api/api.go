@@ -17,7 +17,9 @@
 package api
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -28,6 +30,7 @@ import (
 	"github.com/SENERGY-Platform/go-service-base/struct-logger/attributes"
 
 	gin_mw "github.com/SENERGY-Platform/gin-middleware"
+	"github.com/SENERGY-Platform/gin-middleware/otelx"
 	"github.com/SENERGY-Platform/service-commons/pkg/jwt"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/requestid"
@@ -41,7 +44,13 @@ import (
 // @license.name Apache-2.0
 // @license.url http://www.apache.org/licenses/LICENSE-2.0.html
 // @BasePath /
-func New(srv service.Service, urlPrefix string) (*gin.Engine, error) {
+func New(ctx context.Context, srv service.Service, urlPrefix string, otelEndpoint string) (*gin.Engine, error) {
+	// Idempotent: InitOpenTelemetry has already run this in main, and the setup
+	// behind it happens once per process. The handler comes back either way.
+	otelHandler, err := otelx.GinOpenTelemetry(ctx, ServiceName, otelEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("set up OpenTelemetry: %w", err)
+	}
 	gin.SetMode(gin.ReleaseMode)
 	httpHandler := gin.New()
 	httpHandler.RedirectTrailingSlash = false
@@ -55,6 +64,12 @@ func New(srv service.Service, urlPrefix string) (*gin.Engine, error) {
 	var middleware []gin.HandlerFunc
 	middleware = append(
 		middleware,
+		// First in the chain: it lifts the trace context and the baggage off the
+		// request into the request context, which the access log, the handlers and
+		// the permission calls below all read from.
+		otelHandler,
+		// Directly after it, and it has to stay there: see DiscardBaggageErrors.
+		DiscardBaggageErrors(),
 		gin_mw.StructLoggerHandlerWithDefaultGenerators(
 			util.Logger.With(attributes.LogRecordTypeKey, attributes.HttpAccessLogRecordTypeVal),
 			attributes.Provider,
@@ -88,6 +103,46 @@ func New(srv service.Service, urlPrefix string) (*gin.Engine, error) {
 	return httpHandler, nil
 }
 
+// InitOpenTelemetry sets up the tracer provider and the propagator for the
+// process. It belongs before anything that captures the global provider or makes
+// an outgoing call — a mongo monitor built earlier would hold the no-op provider
+// for good, and a startup call made earlier carries neither traceparent nor
+// baggage. The setup runs once per process and the first caller owns its error:
+// a later call returns nil without having initialised anything.
+func InitOpenTelemetry(ctx context.Context, otelEndpoint string) error {
+	if _, err := otelx.GinOpenTelemetry(ctx, ServiceName, otelEndpoint); err != nil {
+		return fmt.Errorf("set up OpenTelemetry: %w", err)
+	}
+	return nil
+}
+
+// DiscardBaggageErrors takes the errors the OpenTelemetry handler reported off the
+// request and logs them instead.
+//
+// otelx reports a baggage value it cannot carry — one holding a space, a comma or
+// a non-ASCII character — with gin's c.Error. ErrorHandler then turns anything in
+// c.Errors into a response: it forces a 500 where the status was below 400 and
+// appends the error text to the body. A user whose Keycloak username is a display
+// name would get a 500 on every DELETE and a corrupted JSON body on every GET, for
+// a log annotation that failed.
+//
+// This handler has to sit immediately after the OpenTelemetry handler. otelx adds
+// those errors before it calls c.Next(), so at this point nothing else can have
+// added one, which is what makes clearing the slice safe. Moved further down, it
+// would discard a handler's own error.
+func DiscardBaggageErrors() gin.HandlerFunc {
+	return func(gc *gin.Context) {
+		if len(gc.Errors) > 0 {
+			for _, reported := range gc.Errors {
+				util.Logger.WarnContext(gc.Request.Context(),
+					"could not put a value into the request baggage", "error", reported.Err)
+			}
+			gc.Errors = nil
+		}
+		gc.Next()
+	}
+}
+
 // statusCode maps the sentinels from lib onto HTTP statuses. Anything it does
 // not recognise stays a 500, which is what ErrorHandler defaults to.
 func statusCode(err error) int {
@@ -101,6 +156,17 @@ func statusCode(err error) int {
 	default:
 		return http.StatusInternalServerError
 	}
+}
+
+// logError picks the level from the status the error maps to. A 4xx is the
+// caller's own mistake and nothing this service can act on; logging it at ERROR
+// buries the entries that mean the service itself is broken.
+func logError(ctx context.Context, msg string, err error) {
+	if statusCode(err) < http.StatusInternalServerError {
+		util.Logger.WarnContext(ctx, msg, "error", err)
+		return
+	}
+	util.Logger.ErrorContext(ctx, msg, "error", err)
 }
 
 // safeError decides what the caller gets to read. ErrorHandler writes the error
@@ -117,7 +183,7 @@ func AuthMiddleware() gin.HandlerFunc {
 	return func(gc *gin.Context) {
 		userId, err := getUserId(gc)
 		if err != nil {
-			util.Logger.Error("could not get user id")
+			util.Logger.WarnContext(gc.Request.Context(), "could not get user id", "error", err)
 			gc.String(http.StatusUnauthorized, MessageUnauthorized)
 			gc.Abort()
 			return

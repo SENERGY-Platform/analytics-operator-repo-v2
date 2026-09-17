@@ -187,7 +187,7 @@ func userToken(t *testing.T, userId string, roles ...string) string {
 func insert(t *testing.T, repo *MongoRepo, userId string, names ...string) {
 	t.Helper()
 	for _, name := range names {
-		if err := repo.InsertOperator(lib.Operator{Name: name, UserId: userId}); err != nil {
+		if err := repo.InsertOperator(t.Context(), lib.Operator{Name: name, UserId: userId}); err != nil {
 			t.Fatalf("insert %q: %v", name, err)
 		}
 	}
@@ -221,7 +221,7 @@ func TestIntegrationInsertAndFind(t *testing.T) {
 	id := idOf(t, coll, "alpha")
 
 	t.Run("owner reads it", func(t *testing.T) {
-		op, err := repo.FindOperator(id, userToken(t, "user-a"))
+		op, err := repo.FindOperator(t.Context(), id, userToken(t, "user-a"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -237,7 +237,7 @@ func TestIntegrationInsertAndFind(t *testing.T) {
 	})
 
 	t.Run("another user is refused", func(t *testing.T) {
-		_, err := repo.FindOperator(id, userToken(t, "user-b"))
+		_, err := repo.FindOperator(t.Context(), id, userToken(t, "user-b"))
 		if !errors.Is(err, lib.ErrMissingRights) {
 			t.Errorf("error = %v, want ErrMissingRights", err)
 		}
@@ -246,7 +246,7 @@ func TestIntegrationInsertAndFind(t *testing.T) {
 	t.Run("an unknown id is refused, not reported as missing", func(t *testing.T) {
 		// 403 and not 404: permissions-v2 cannot tell "no rights" from "does not
 		// exist", and saying which would let a caller enumerate ids.
-		_, err := repo.FindOperator(bson.NewObjectID().Hex(), userToken(t, "user-a"))
+		_, err := repo.FindOperator(t.Context(), bson.NewObjectID().Hex(), userToken(t, "user-a"))
 		if !errors.Is(err, lib.ErrMissingRights) {
 			t.Errorf("error = %v, want ErrMissingRights", err)
 		}
@@ -258,14 +258,14 @@ func TestIntegrationInsertAndFind(t *testing.T) {
 		if _, err := coll.DeleteOne(context.Background(), bson.M{"name": "alpha"}); err != nil {
 			t.Fatalf("delete document: %v", err)
 		}
-		_, err := repo.FindOperator(id, userToken(t, "user-a"))
+		_, err := repo.FindOperator(t.Context(), id, userToken(t, "user-a"))
 		if !errors.Is(err, lib.ErrNotFound) {
 			t.Errorf("error = %v, want ErrNotFound", err)
 		}
 	})
 
 	t.Run("a malformed id never reaches the database", func(t *testing.T) {
-		_, err := repo.FindOperator("not-an-id", userToken(t, "user-a"))
+		_, err := repo.FindOperator(t.Context(), "not-an-id", userToken(t, "user-a"))
 		if !errors.Is(err, lib.ErrInvalidInput) {
 			t.Errorf("error = %v, want ErrInvalidInput", err)
 		}
@@ -343,7 +343,7 @@ func TestIntegrationAllSortingAndPaging(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			resp, err := repo.All("user-a", false, tc.args, auth)
+			resp, err := repo.All(t.Context(), "user-a", false, tc.args, auth)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -364,6 +364,31 @@ func TestIntegrationAllSortingAndPaging(t *testing.T) {
 	}
 }
 
+// TestIntegrationWritesSurviveACancelledRequest pins where the request context
+// stops being the caller's to abort. A write and the permissions-v2 entry that
+// belongs to it are two steps, so a client hanging up between them would leave a
+// row nobody can reach; reads carry no such pair and stay abortable.
+func TestIntegrationWritesSurviveACancelledRequest(t *testing.T) {
+	repo, coll := testRepo(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	if err := repo.InsertOperator(ctx, lib.Operator{Name: "alpha", UserId: "user-a"}); err != nil {
+		t.Fatalf("insert on a cancelled context: %v", err)
+	}
+	count, err := coll.CountDocuments(t.Context(), bson.M{})
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("collection holds %d documents, want the one that was written", count)
+	}
+
+	if _, err = repo.All(ctx, "user-a", false, map[string][]string{}, userToken(t, "user-a")); !errors.Is(err, context.Canceled) {
+		t.Errorf("read error = %v, want context.Canceled — only the write paths are exempt", err)
+	}
+}
+
 func TestIntegrationAllRejectsBadParameters(t *testing.T) {
 	repo, _ := testRepo(t)
 	insert(t, repo, "user-a", "alpha")
@@ -378,7 +403,7 @@ func TestIntegrationAllRejectsBadParameters(t *testing.T) {
 		{"limit": {fmt.Sprint(MaxLimit + 1)}},
 	} {
 		t.Run(fmt.Sprint(args), func(t *testing.T) {
-			_, err := repo.All("user-a", false, args, auth)
+			_, err := repo.All(t.Context(), "user-a", false, args, auth)
 			if !errors.Is(err, lib.ErrInvalidInput) {
 				t.Errorf("error = %v, want ErrInvalidInput", err)
 			}
@@ -415,7 +440,7 @@ func TestIntegrationAllLimitContract(t *testing.T) {
 	auth := userToken(t, "user-a")
 
 	t.Run("no limit caps at MaxLimit", func(t *testing.T) {
-		resp, err := repo.All("user-a", false, map[string][]string{}, auth)
+		resp, err := repo.All(t.Context(), "user-a", false, map[string][]string{}, auth)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -430,7 +455,7 @@ func TestIntegrationAllLimitContract(t *testing.T) {
 	})
 
 	t.Run("limit=0 returns everything", func(t *testing.T) {
-		resp, err := repo.All("user-a", false, map[string][]string{"limit": {"0"}}, auth)
+		resp, err := repo.All(t.Context(), "user-a", false, map[string][]string{"limit": {"0"}}, auth)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -465,7 +490,7 @@ func TestIntegrationSearchIsLiteral(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run("search="+tc.search, func(t *testing.T) {
-			resp, err := repo.All("user-a", false, map[string][]string{
+			resp, err := repo.All(t.Context(), "user-a", false, map[string][]string{
 				"search": {tc.search},
 				"sort":   {"name:asc"},
 			}, auth)
@@ -489,14 +514,14 @@ func TestIntegrationUpdate(t *testing.T) {
 	id := idOf(t, coll, "alpha")
 
 	t.Run("owner updates and the version moves", func(t *testing.T) {
-		before, err := repo.FindOperator(id, userToken(t, "user-a"))
+		before, err := repo.FindOperator(t.Context(), id, userToken(t, "user-a"))
 		if err != nil {
 			t.Fatalf("read before: %v", err)
 		}
-		if err = repo.UpdateOperator(id, lib.Operator{Name: "alpha renamed", Image: "img:1"}, userToken(t, "user-a")); err != nil {
+		if err = repo.UpdateOperator(t.Context(), id, lib.Operator{Name: "alpha renamed", Image: "img:1"}, userToken(t, "user-a")); err != nil {
 			t.Fatalf("update: %v", err)
 		}
-		after, err := repo.FindOperator(id, userToken(t, "user-a"))
+		after, err := repo.FindOperator(t.Context(), id, userToken(t, "user-a"))
 		if err != nil {
 			t.Fatalf("read after: %v", err)
 		}
@@ -519,11 +544,11 @@ func TestIntegrationUpdate(t *testing.T) {
 	})
 
 	t.Run("another user is refused and changes nothing", func(t *testing.T) {
-		err := repo.UpdateOperator(id, lib.Operator{Name: "hijacked"}, userToken(t, "user-b"))
+		err := repo.UpdateOperator(t.Context(), id, lib.Operator{Name: "hijacked"}, userToken(t, "user-b"))
 		if !errors.Is(err, lib.ErrMissingRights) {
 			t.Fatalf("error = %v, want ErrMissingRights", err)
 		}
-		op, err := repo.FindOperator(id, userToken(t, "user-a"))
+		op, err := repo.FindOperator(t.Context(), id, userToken(t, "user-a"))
 		if err != nil {
 			t.Fatalf("read back: %v", err)
 		}
@@ -536,7 +561,7 @@ func TestIntegrationUpdate(t *testing.T) {
 		if _, err := coll.DeleteOne(context.Background(), bson.M{"_id": mustObjectID(t, id)}); err != nil {
 			t.Fatalf("delete document: %v", err)
 		}
-		err := repo.UpdateOperator(id, lib.Operator{Name: "x"}, userToken(t, "user-a"))
+		err := repo.UpdateOperator(t.Context(), id, lib.Operator{Name: "x"}, userToken(t, "user-a"))
 		if !errors.Is(err, lib.ErrNotFound) {
 			t.Errorf("error = %v, want ErrNotFound", err)
 		}
@@ -558,7 +583,7 @@ func TestIntegrationDelete(t *testing.T) {
 	alpha := idOf(t, coll, "alpha")
 
 	t.Run("another user is refused and the document stays", func(t *testing.T) {
-		err := repo.DeleteOperator(alpha, userToken(t, "user-b"))
+		err := repo.DeleteOperator(t.Context(), alpha, userToken(t, "user-b"))
 		if !errors.Is(err, lib.ErrMissingRights) {
 			t.Fatalf("error = %v, want ErrMissingRights", err)
 		}
@@ -572,7 +597,7 @@ func TestIntegrationDelete(t *testing.T) {
 	})
 
 	t.Run("owner deletes it and the permission goes with it", func(t *testing.T) {
-		if err := repo.DeleteOperator(alpha, userToken(t, "user-a")); err != nil {
+		if err := repo.DeleteOperator(t.Context(), alpha, userToken(t, "user-a")); err != nil {
 			t.Fatalf("delete: %v", err)
 		}
 		n, err := coll.CountDocuments(context.Background(), bson.M{"_id": mustObjectID(t, alpha)})
@@ -584,13 +609,13 @@ func TestIntegrationDelete(t *testing.T) {
 		}
 		// A permission entry left behind would keep granting access to an id that
 		// a later insert could reuse.
-		if _, err = repo.FindOperator(alpha, userToken(t, "user-a")); !errors.Is(err, lib.ErrMissingRights) {
+		if _, err = repo.FindOperator(t.Context(), alpha, userToken(t, "user-a")); !errors.Is(err, lib.ErrMissingRights) {
 			t.Errorf("error after delete = %v, want ErrMissingRights", err)
 		}
 	})
 
 	t.Run("deleting it twice reports missing rights", func(t *testing.T) {
-		if err := repo.DeleteOperator(alpha, userToken(t, "user-a")); !errors.Is(err, lib.ErrMissingRights) {
+		if err := repo.DeleteOperator(t.Context(), alpha, userToken(t, "user-a")); !errors.Is(err, lib.ErrMissingRights) {
 			t.Errorf("error = %v, want ErrMissingRights", err)
 		}
 	})
@@ -607,7 +632,7 @@ func TestIntegrationDeleteOperators(t *testing.T) {
 	t.Run("one id the caller may not touch refuses the whole call", func(t *testing.T) {
 		// The rights of every id are checked before the first delete, so nothing
 		// is removed when one of them is refused.
-		err := repo.DeleteOperators([]string{alpha, charlie}, userToken(t, "user-a"))
+		err := repo.DeleteOperators(t.Context(), []string{alpha, charlie}, userToken(t, "user-a"))
 		if !errors.Is(err, lib.ErrMissingRights) {
 			t.Fatalf("error = %v, want ErrMissingRights", err)
 		}
@@ -621,7 +646,7 @@ func TestIntegrationDeleteOperators(t *testing.T) {
 	})
 
 	t.Run("all permitted", func(t *testing.T) {
-		if err := repo.DeleteOperators([]string{alpha, bravo}, userToken(t, "user-a")); err != nil {
+		if err := repo.DeleteOperators(t.Context(), []string{alpha, bravo}, userToken(t, "user-a")); err != nil {
 			t.Fatalf("delete: %v", err)
 		}
 		n, err := coll.CountDocuments(context.Background(), bson.M{})
@@ -657,7 +682,7 @@ func TestIntegrationValidateOperatorPermissionsBeyondMaxLimit(t *testing.T) {
 		t.Fatalf("bulk insert: %v", err)
 	}
 
-	if err := repo.ValidateOperatorPermissions(); err != nil {
+	if err := repo.ValidateOperatorPermissions(t.Context()); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
 
@@ -698,7 +723,7 @@ func TestIntegrationValidateOperatorPermissionsRemovesOrphans(t *testing.T) {
 		t.Fatalf("plant orphan: %v", err)
 	}
 
-	if err := repo.ValidateOperatorPermissions(); err != nil {
+	if err := repo.ValidateOperatorPermissions(t.Context()); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
 

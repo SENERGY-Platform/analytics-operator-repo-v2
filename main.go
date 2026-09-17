@@ -66,6 +66,16 @@ func main() {
 
 	ctx, cf := context.WithCancel(context.Background())
 
+	// Before the database and the service: the permission reconciliation in
+	// service.New makes outgoing calls, and until this has run the global
+	// propagator is the no-op one, so those calls carry no trace at all.
+	if err = api.InitOpenTelemetry(ctx, cfg.OtelEndpoint); err != nil {
+		util.Logger.Error("error on opentelemetry init", "error", err)
+		ec.Store(1)
+		cf()
+		return
+	}
+
 	database, err := db.New(cfg.MongoUrl, cfg.MongoDatabase)
 	if err != nil {
 		util.Logger.Error("error on db init", "error", err)
@@ -82,7 +92,7 @@ func main() {
 		return
 	}
 
-	httpHandler, err := api.New(*srv, cfg.URLPrefix)
+	httpHandler, err := api.New(ctx, *srv, cfg.URLPrefix, cfg.OtelEndpoint)
 	if err != nil {
 		util.Logger.Error("error on new httpHandler", "error", err)
 		ec.Store(1)

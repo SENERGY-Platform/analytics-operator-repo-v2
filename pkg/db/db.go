@@ -37,7 +37,9 @@ type MongoDB struct {
 }
 
 func New(url string, database string) (*MongoDB, error) {
-	client, err := mongo.Connect(options.Client().ApplyURI("mongodb://" + url))
+	client, err := mongo.Connect(options.Client().
+		ApplyURI("mongodb://" + url).
+		SetMonitor(newCommandMonitor()))
 	if err != nil {
 		return nil, err
 	}

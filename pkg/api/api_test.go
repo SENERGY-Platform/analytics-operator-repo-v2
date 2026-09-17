@@ -17,6 +17,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -62,6 +63,50 @@ func TestStatusCode(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := statusCode(tc.err); got != tc.want {
 				t.Errorf("statusCode(%v) = %d, want %d", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestLogErrorLevel pins which errors reach the error log. A caller sending a
+// query this service refuses is not an incident here, and the entries used to
+// be indistinguishable from a database that is gone.
+func TestLogErrorLevel(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want slog.Level
+	}{
+		{"invalid input", lib.ErrInvalidInput, slog.LevelWarn},
+		{"invalid input, wrapped", fmt.Errorf("%w: limit exceeds maximum of 1000", lib.ErrInvalidInput), slog.LevelWarn},
+		{"missing rights", lib.ErrMissingRights, slog.LevelWarn},
+		{"not found", lib.ErrNotFound, slog.LevelWarn},
+		{"anything else stays an error", errors.New("connection refused"), slog.LevelError},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			restore := util.Logger
+			util.Logger = slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+			t.Cleanup(func() { util.Logger = restore })
+
+			logError(t.Context(), "error getting operators", tc.err)
+
+			var record struct {
+				Level string `json:"level"`
+				Msg   string `json:"msg"`
+				Error string `json:"error"`
+			}
+			if err := json.Unmarshal(buf.Bytes(), &record); err != nil {
+				t.Fatalf("decode log record %q: %v", buf.String(), err)
+			}
+			if record.Level != tc.want.String() {
+				t.Errorf("level = %s, want %s", record.Level, tc.want)
+			}
+			// The level is the only thing that changes: an operator still needs
+			// the message and the error text to find the caller.
+			if record.Msg != "error getting operators" || !strings.Contains(record.Error, tc.err.Error()) {
+				t.Errorf("record = %+v, want the message and the error text kept", record)
 			}
 		})
 	}

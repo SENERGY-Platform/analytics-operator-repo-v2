@@ -42,7 +42,7 @@ func New(ctx context.Context, permissionsUrl string, database db.MongoDB) (*Serv
 	if err != nil {
 		return nil, err
 	}
-	if err = dbRepo.ValidateOperatorPermissions(); err != nil {
+	if err = dbRepo.ValidateOperatorPermissions(ctx); err != nil {
 		return nil, err
 	}
 	return &Service{dbRepo: dbRepo}, nil
@@ -65,27 +65,27 @@ func newPermissionsClient(ctx context.Context, url string) (permV2Client.Client,
 	return permV2Client.New(url), nil
 }
 
-func (s *Service) CreateOperator(operator lib.Operator, userId string) (err error) {
+func (s *Service) CreateOperator(ctx context.Context, operator lib.Operator, userId string) (err error) {
 	operator.UserId = userId
-	return s.dbRepo.InsertOperator(operator)
+	return s.dbRepo.InsertOperator(ctx, operator)
 }
 
-func (s *Service) UpdateOperator(id string, operator lib.Operator, auth string) (err error) {
-	return s.dbRepo.UpdateOperator(id, operator, auth)
+func (s *Service) UpdateOperator(ctx context.Context, id string, operator lib.Operator, auth string) (err error) {
+	return s.dbRepo.UpdateOperator(ctx, id, operator, auth)
 }
 
-func (s *Service) DeleteOperator(id string, auth string) (err error) {
-	return s.dbRepo.DeleteOperator(id, auth)
+func (s *Service) DeleteOperator(ctx context.Context, id string, auth string) (err error) {
+	return s.dbRepo.DeleteOperator(ctx, id, auth)
 }
 
-func (s *Service) DeleteOperators(ids []string, auth string) (err error) {
-	return s.dbRepo.DeleteOperators(ids, auth)
+func (s *Service) DeleteOperators(ctx context.Context, ids []string, auth string) (err error) {
+	return s.dbRepo.DeleteOperators(ctx, ids, auth)
 }
 
-func (s *Service) GetOperators(userId string, args map[string][]string, auth string) (response lib.OperatorResponse, err error) {
-	return s.dbRepo.All(userId, false, args, auth)
+func (s *Service) GetOperators(ctx context.Context, userId string, args map[string][]string, auth string) (response lib.OperatorResponse, err error) {
+	return s.dbRepo.All(ctx, userId, false, args, auth)
 }
 
-func (s *Service) GetOperator(id string, auth string) (response lib.Operator, err error) {
-	return s.dbRepo.FindOperator(id, auth)
+func (s *Service) GetOperator(ctx context.Context, id string, auth string) (response lib.Operator, err error) {
+	return s.dbRepo.FindOperator(ctx, id, auth)
 }

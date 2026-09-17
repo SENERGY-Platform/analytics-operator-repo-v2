@@ -32,7 +32,7 @@ import (
 // @Description	Gets all operators
 // @Tags Operator
 // @Produce json
-// @Param limit query int false "Maximum number of operators to return; also the default cap" default(1000)
+// @Param limit query int false "Maximum number of operators to return, at most 1000; 0 means no limit" default(1000)
 // @Param offset query int false "Number of operators to skip"
 // @Param sort query string false "Sort as field[:asc|desc]; only name is sortable" example(name:desc)
 // @Param search query string false "Case-sensitive substring match on name; treated literally"
@@ -43,9 +43,9 @@ import (
 func getAll(srv service.Service) (string, string, gin.HandlerFunc) {
 	return http.MethodGet, "/operator", func(gc *gin.Context) {
 		args := gc.Request.URL.Query()
-		operators, err := srv.GetOperators(gc.GetString(UserIdKey), args, gc.GetHeader("Authorization"))
+		operators, err := srv.GetOperators(gc.Request.Context(), gc.GetString(UserIdKey), args, gc.GetHeader("Authorization"))
 		if err != nil {
-			util.Logger.Error("error getting operators", "error", err)
+			logError(gc.Request.Context(), "error getting operators", err)
 			_ = gc.Error(safeError(err))
 			return
 		}
@@ -67,9 +67,9 @@ func getAll(srv service.Service) (string, string, gin.HandlerFunc) {
 // @Router /operator/{id} [get]
 func getOperator(srv service.Service) (string, string, gin.HandlerFunc) {
 	return http.MethodGet, "/operator/:id", func(gc *gin.Context) {
-		resp, err := srv.GetOperator(gc.Param("id"), gc.GetHeader("Authorization"))
+		resp, err := srv.GetOperator(gc.Request.Context(), gc.Param("id"), gc.GetHeader("Authorization"))
 		if err != nil {
-			util.Logger.Error("error getting operator", "error", err)
+			logError(gc.Request.Context(), "error getting operator", err)
 			_ = gc.Error(safeError(err))
 			return
 		}
@@ -91,13 +91,13 @@ func putOperator(srv service.Service) (string, string, gin.HandlerFunc) {
 	return http.MethodPut, "/operator/", func(gc *gin.Context) {
 		var request lib.Operator
 		if err := gc.ShouldBindJSON(&request); err != nil {
-			util.Logger.Error("error creating operator", "error", err)
+			util.Logger.WarnContext(gc.Request.Context(), "error creating operator", "error", err)
 			_ = gc.Error(fmt.Errorf("%w: malformed request body", lib.ErrInvalidInput))
 			return
 		}
-		err := srv.CreateOperator(request, gc.GetString(UserIdKey))
+		err := srv.CreateOperator(gc.Request.Context(), request, gc.GetString(UserIdKey))
 		if err != nil {
-			util.Logger.Error("error creating operator", "error", err)
+			logError(gc.Request.Context(), "error creating operator", err)
 			_ = gc.Error(safeError(err))
 			return
 		}
@@ -132,13 +132,13 @@ func postOperatorHandler(srv service.Service) gin.HandlerFunc {
 	return func(gc *gin.Context) {
 		var request lib.Operator
 		if err := gc.ShouldBindJSON(&request); err != nil {
-			util.Logger.Error("error updating operator", "error", err)
+			util.Logger.WarnContext(gc.Request.Context(), "error updating operator", "error", err)
 			_ = gc.Error(fmt.Errorf("%w: malformed request body", lib.ErrInvalidInput))
 			return
 		}
-		err := srv.UpdateOperator(gc.Param("id"), request, gc.GetHeader("Authorization"))
+		err := srv.UpdateOperator(gc.Request.Context(), gc.Param("id"), request, gc.GetHeader("Authorization"))
 		if err != nil {
-			util.Logger.Error("error updating operator", "error", err)
+			logError(gc.Request.Context(), "error updating operator", err)
 			_ = gc.Error(safeError(err))
 			return
 		}
@@ -169,9 +169,9 @@ func deleteOperatorAlias(srv service.Service) (string, string, gin.HandlerFunc) 
 
 func deleteOperatorHandler(srv service.Service) gin.HandlerFunc {
 	return func(gc *gin.Context) {
-		err := srv.DeleteOperator(gc.Param("id"), gc.GetHeader("Authorization"))
+		err := srv.DeleteOperator(gc.Request.Context(), gc.Param("id"), gc.GetHeader("Authorization"))
 		if err != nil {
-			util.Logger.Error("error deleting operator", "error", err)
+			logError(gc.Request.Context(), "error deleting operator", err)
 			_ = gc.Error(safeError(err))
 			return
 		}
@@ -195,14 +195,14 @@ func deleteOperators(srv service.Service) (string, string, gin.HandlerFunc) {
 	return http.MethodDelete, "/operator", func(gc *gin.Context) {
 		var request []string
 		if err := gc.ShouldBindJSON(&request); err != nil {
-			util.Logger.Error("error deleting operators", "error", err)
+			util.Logger.WarnContext(gc.Request.Context(), "error deleting operators", "error", err)
 			_ = gc.Error(fmt.Errorf("%w: malformed request body", lib.ErrInvalidInput))
 			return
 		}
 
-		err := srv.DeleteOperators(request, gc.GetHeader("Authorization"))
+		err := srv.DeleteOperators(gc.Request.Context(), request, gc.GetHeader("Authorization"))
 		if err != nil {
-			util.Logger.Error("error deleting operators", "error", err)
+			logError(gc.Request.Context(), "error deleting operators", err)
 			_ = gc.Error(safeError(err))
 			return
 		}
