@@ -154,7 +154,7 @@ func testRepo(t *testing.T) (*MongoRepo, *mongo.Collection) {
 	if err != nil {
 		t.Fatalf("permissions-v2 test client: %v", err)
 	}
-	repo, err := NewMongoRepo(perm, coll)
+	repo, err := NewMongoRepo(t.Context(), perm, coll)
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}

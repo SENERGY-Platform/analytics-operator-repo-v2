@@ -18,6 +18,9 @@ package db
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,6 +28,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
@@ -72,6 +76,54 @@ func TestIntegrationQuerySpansHangUnderTheCallersSpan(t *testing.T) {
 	}
 }
 
+// TestIntegrationPermissionLookupsCarryTheTrace is why the client's *Context
+// variants are used at all: they inject traceparent and baggage into the
+// outgoing request, so a permission lookup appears in the trace of the request
+// that caused it. The plain variants compile and work, and pass context.TODO(),
+// which drops both without an error anywhere.
+//
+// Driven against the real client and a server that only records what arrives;
+// the in-process test client makes no HTTP request and can show nothing here.
+func TestIntegrationPermissionLookupsCarryTheTrace(t *testing.T) {
+	var traceparent string
+	permissions := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		traceparent = r.Header.Get("traceparent")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("[]"))
+	}))
+	t.Cleanup(permissions.Close)
+
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	restoreProvider := otel.GetTracerProvider()
+	restorePropagator := otel.GetTextMapPropagator()
+	otel.SetTracerProvider(provider)
+	// The propagator is what writes the header; otelx sets this one in production.
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() {
+		otel.SetTracerProvider(restoreProvider)
+		otel.SetTextMapPropagator(restorePropagator)
+	})
+
+	// Built directly rather than through NewMongoRepo: the constructor registers
+	// the permissions topic, and this server answers every path the same way.
+	repo := &MongoRepo{perm: permV2Client.New(permissions.URL), coll: testCollection(t)}
+
+	ctx, span := provider.Tracer("test").Start(t.Context(), "request")
+	if _, err := repo.All(ctx, "user-a", false, map[string][]string{}, userToken(t, "user-a")); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	span.End()
+
+	if traceparent == "" {
+		t.Fatal("the permission lookup carried no traceparent")
+	}
+	if !strings.Contains(traceparent, span.SpanContext().TraceID().String()) {
+		t.Errorf("traceparent = %q, want the trace id %s of the caller",
+			traceparent, span.SpanContext().TraceID())
+	}
+}
+
 // tracedRepo opens a database of its own through New, so the client carries the
 // command monitor, and drops it again afterwards.
 func tracedRepo(t *testing.T) *MongoRepo {
@@ -94,7 +146,7 @@ func tracedRepo(t *testing.T) *MongoRepo {
 	if err != nil {
 		t.Fatalf("permissions-v2 test client: %v", err)
 	}
-	repo, err := NewMongoRepo(perm, database.OperatorCollection())
+	repo, err := NewMongoRepo(t.Context(), perm, database.OperatorCollection())
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}

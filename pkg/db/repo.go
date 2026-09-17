@@ -50,8 +50,8 @@ type MongoRepo struct {
 	coll *mongo.Collection
 }
 
-func NewMongoRepo(perm permV2Client.Client, coll *mongo.Collection) (*MongoRepo, error) {
-	_, err, _ := perm.SetTopic(permV2Client.InternalAdminToken, permV2Client.Topic{
+func NewMongoRepo(ctx context.Context, perm permV2Client.Client, coll *mongo.Collection) (*MongoRepo, error) {
+	_, err, _ := perm.SetTopicContext(ctx, permV2Client.InternalAdminToken, permV2Client.Topic{
 		Id: PermV2InstanceTopic,
 		DefaultPermissions: permV2Client.ResourcePermissions{
 			RolePermissions: map[string]permV2Model.PermissionsMap{
@@ -76,7 +76,7 @@ func (r *MongoRepo) ValidateOperatorPermissions(ctx context.Context) (err error)
 	if err != nil {
 		return
 	}
-	permResources, err, _ := r.perm.ListResourcesWithAdminPermission(permV2Client.InternalAdminToken, PermV2InstanceTopic, permV2Client.ListOptions{})
+	permResources, err, _ := r.perm.ListResourcesWithAdminPermissionContext(ctx, permV2Client.InternalAdminToken, PermV2InstanceTopic, permV2Client.ListOptions{})
 	if err != nil {
 		return
 	}
@@ -107,7 +107,7 @@ func (r *MongoRepo) ValidateOperatorPermissions(ctx context.Context) (err error)
 		}
 		SetDefaultPermissions(operator, permissions)
 
-		_, err, _ = r.perm.SetPermission(permV2Client.InternalAdminToken, PermV2InstanceTopic, operatorId, permissions)
+		_, err, _ = r.perm.SetPermissionContext(ctx, permV2Client.InternalAdminToken, PermV2InstanceTopic, operatorId, permissions)
 		if err != nil {
 			return
 		}
@@ -116,7 +116,7 @@ func (r *MongoRepo) ValidateOperatorPermissions(ctx context.Context) (err error)
 
 	for permResouceId := range permResourceIds {
 		if !slices.Contains(dbIds, permResouceId) {
-			err, _ = r.perm.RemoveResource(permV2Client.InternalAdminToken, PermV2InstanceTopic, permResouceId)
+			err, _ = r.perm.RemoveResourceContext(ctx, permV2Client.InternalAdminToken, PermV2InstanceTopic, permResouceId)
 			if err != nil {
 				return
 			}
@@ -142,18 +142,19 @@ func (r *MongoRepo) InsertOperator(ctx context.Context, operator lib.Operator) (
 	}
 	// Without the cancellation, with the trace: a client that hangs up mid-write
 	// would otherwise leave the document in place and the permission entry unwritten.
-	result, err := r.coll.InsertOne(context.WithoutCancel(ctx), operator)
+	writeCtx := context.WithoutCancel(ctx)
+	result, err := r.coll.InsertOne(writeCtx, operator)
 	if err != nil {
 		return err
 	}
 
 	id := result.InsertedID.(bson.ObjectID).Hex()
-	_, err, _ = r.perm.SetPermission(permV2Client.InternalAdminToken, PermV2InstanceTopic, id, permissions)
+	_, err, _ = r.perm.SetPermissionContext(writeCtx, permV2Client.InternalAdminToken, PermV2InstanceTopic, id, permissions)
 	return
 }
 
 func (r *MongoRepo) DeleteOperator(ctx context.Context, id string, auth string) (err error) {
-	ok, err, _ := r.perm.CheckPermission(auth, PermV2InstanceTopic, id, permV2Client.Administrate)
+	ok, err, _ := r.perm.CheckPermissionContext(ctx, auth, PermV2InstanceTopic, id, permV2Client.Administrate)
 	if err != nil {
 		return err
 	}
@@ -167,16 +168,17 @@ func (r *MongoRepo) DeleteOperator(ctx context.Context, id string, auth string) 
 	}
 	req := bson.M{"_id": objID}
 	// See InsertOperator: the delete and the permission removal belong together.
-	res := r.coll.FindOneAndDelete(context.WithoutCancel(ctx), req)
+	writeCtx := context.WithoutCancel(ctx)
+	res := r.coll.FindOneAndDelete(writeCtx, req)
 	if res.Err() != nil {
 		return notFound(res.Err())
 	}
-	err, _ = r.perm.RemoveResource(permV2Client.InternalAdminToken, PermV2InstanceTopic, id)
+	err, _ = r.perm.RemoveResourceContext(writeCtx, permV2Client.InternalAdminToken, PermV2InstanceTopic, id)
 	return
 }
 
 func (r *MongoRepo) DeleteOperators(ctx context.Context, ids []string, auth string) (err error) {
-	okArr, err, _ := r.perm.CheckMultiplePermissions(auth, PermV2InstanceTopic, ids, permV2Client.Administrate)
+	okArr, err, _ := r.perm.CheckMultiplePermissionsContext(ctx, auth, PermV2InstanceTopic, ids, permV2Client.Administrate)
 	if err != nil {
 		return err
 	}
@@ -199,7 +201,7 @@ func (r *MongoRepo) DeleteOperators(ctx context.Context, ids []string, auth stri
 		if res.Err() != nil {
 			return notFound(res.Err())
 		}
-		err, _ = r.perm.RemoveResource(permV2Client.InternalAdminToken, PermV2InstanceTopic, id)
+		err, _ = r.perm.RemoveResourceContext(ctx, permV2Client.InternalAdminToken, PermV2InstanceTopic, id)
 		if err != nil {
 			return
 		}
@@ -208,7 +210,7 @@ func (r *MongoRepo) DeleteOperators(ctx context.Context, ids []string, auth stri
 }
 
 func (r *MongoRepo) UpdateOperator(ctx context.Context, id string, operator lib.Operator, auth string) (err error) {
-	ok, err, _ := r.perm.CheckPermission(auth, PermV2InstanceTopic, id, permV2Client.Write)
+	ok, err, _ := r.perm.CheckPermissionContext(ctx, auth, PermV2InstanceTopic, id, permV2Client.Write)
 	if err != nil {
 		return err
 	}
@@ -279,7 +281,7 @@ func (r *MongoRepo) All(ctx context.Context, userId string, admin bool, args map
 	ids := []bson.ObjectID{}
 	var stringIds []string
 	if !admin {
-		stringIds, err, _ = r.perm.ListAccessibleResourceIds(auth, PermV2InstanceTopic, permV2Client.ListOptions{}, permV2Client.Read)
+		stringIds, err, _ = r.perm.ListAccessibleResourceIdsContext(ctx, auth, PermV2InstanceTopic, permV2Client.ListOptions{}, permV2Client.Read)
 		if err != nil {
 			return
 		}
@@ -330,7 +332,7 @@ func (r *MongoRepo) FindOperator(ctx context.Context, id string, auth string) (o
 	if err != nil {
 		return
 	}
-	ok, err, _ := r.perm.CheckPermission(auth, PermV2InstanceTopic, id, permV2Client.Read)
+	ok, err, _ := r.perm.CheckPermissionContext(ctx, auth, PermV2InstanceTopic, id, permV2Client.Read)
 	if err != nil {
 		return operator, err
 	}

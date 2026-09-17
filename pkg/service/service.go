@@ -38,7 +38,7 @@ func New(ctx context.Context, permissionsUrl string, database db.MongoDB) (*Serv
 	if err != nil {
 		return nil, fmt.Errorf("permissions client: %w", err)
 	}
-	dbRepo, err := db.NewMongoRepo(perm, database.OperatorCollection())
+	dbRepo, err := db.NewMongoRepo(ctx, perm, database.OperatorCollection())
 	if err != nil {
 		return nil, err
 	}
