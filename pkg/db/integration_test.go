@@ -46,10 +46,14 @@ import (
 const (
 	envTestMongoURL  = "MONGO_TEST_URL"
 	envRequireMongo  = "REQUIRE_MONGO"
-	defaultTestMongo = "localhost:27017"
+	defaultTestMongo = "mongodb://localhost:27017"
 )
 
 var probed *mongo.Client
+
+// errBadTestURL marks a MONGO_TEST_URL the driver cannot parse, such as the old
+// host:port form. That is a configuration error and must not be skipped as "no database".
+var errBadTestURL = errors.New("invalid " + envTestMongoURL)
 
 // sharedClient connects once per package run. Probing per test would cost the
 // server-selection timeout for every one of them on a workstation without a
@@ -57,10 +61,10 @@ var probed *mongo.Client
 var sharedClient = sync.OnceValues(func() (*mongo.Client, error) {
 	url := testMongoURL()
 	client, err := mongo.Connect(options.Client().
-		ApplyURI("mongodb://" + url).
+		ApplyURI(url).
 		SetServerSelectionTimeout(2 * time.Second))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", errBadTestURL, err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -97,6 +101,9 @@ func requireMongo(t *testing.T) *mongo.Client {
 	t.Helper()
 	client, err := sharedClient()
 	if err != nil {
+		if errors.Is(err, errBadTestURL) {
+			t.Fatalf("%v (want a connection string like %s)", err, defaultTestMongo)
+		}
 		if os.Getenv(envRequireMongo) != "" {
 			t.Fatalf("%s is set but no MongoDB at %s: %v", envRequireMongo, testMongoURL(), err)
 		}
@@ -755,7 +762,7 @@ func TestIntegrationNewPingsAndCreatesIndexes(t *testing.T) {
 	requireMongo(t)
 
 	dbName := testDatabaseName(t)
-	database, err := New(testMongoURL(), dbName)
+	database, err := New(Config{URL: testMongoURL(), Database: dbName})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -791,7 +798,7 @@ func TestIntegrationNewPingsAndCreatesIndexes(t *testing.T) {
 
 	// Running it again must not fail — the service creates the indexes on every
 	// start.
-	second, err := New(testMongoURL(), dbName)
+	second, err := New(Config{URL: testMongoURL(), Database: dbName})
 	if err != nil {
 		t.Fatalf("New on an existing database: %v", err)
 	}
@@ -807,7 +814,180 @@ func TestIntegrationNewFailsOnUnreachableDatabase(t *testing.T) {
 	// from it verbatim: the driver otherwise retries until the 10s deadline of
 	// getTimeoutContext, which is right in production and ten wasted seconds in
 	// every test run. The code path under test is unchanged.
-	if _, err := New("127.0.0.1:1/?serverSelectionTimeoutMS=200", "operators_test_unreachable"); err == nil {
+	if _, err := New(Config{URL: "mongodb://127.0.0.1:1/?serverSelectionTimeoutMS=200", Database: "operators_test_unreachable"}); err == nil {
 		t.Error("New accepted an address with nothing listening")
+	}
+}
+
+func TestIntegrationNewAuthenticatesWithConfiguredUser(t *testing.T) {
+	// A server without --auth still verifies credentials a client presents, so
+	// the wrong-credential cases hold on both; the cases that depend on
+	// authorization need a server that enforces it (see docs/running-the-tests.md).
+	client := requireMongo(t)
+	dbName := testDatabaseName(t)
+	const user, password = "operator_repo_test", "correct-password"
+	const readOnlyUser = "operator_repo_test_ro"
+
+	// Dropping a database leaves its users behind, so they are removed explicitly.
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := client.Database(dbName).RunCommand(cleanupCtx, bson.D{{Key: "dropAllUsersFromDatabase", Value: 1}}).Err(); err != nil {
+			t.Errorf("drop users of %s: %v", dbName, err)
+		}
+		if err := client.Database(dbName).Drop(cleanupCtx); err != nil {
+			t.Errorf("drop %s: %v", dbName, err)
+		}
+	})
+
+	createTestUser(t, client, dbName, user, password, "readWrite")
+	createTestUser(t, client, dbName, readOnlyUser, password, "read")
+
+	t.Run("correct credentials", func(t *testing.T) {
+		database, err := New(Config{URL: testMongoURL(), User: user, Password: password, AuthSource: dbName, Database: dbName})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		database.Disconnect()
+	})
+
+	for name, cfg := range map[string]Config{
+		"wrong password":    {User: user, Password: "wrong-password", AuthSource: dbName},
+		"wrong auth source": {User: user, Password: password, AuthSource: "admin"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg.URL = testMongoURL()
+			cfg.Database = dbName
+			database, err := New(cfg)
+			if err == nil {
+				database.Disconnect()
+				t.Fatal("New accepted credentials the server should reject")
+			}
+			if strings.Contains(err.Error(), cfg.Password.Value()) {
+				t.Errorf("the error text contains the password: %v", err)
+			}
+		})
+	}
+
+	// The next two go through open with a client of their own, so that the
+	// disconnect on the failure path can be checked as well.
+	t.Run("no credentials", func(t *testing.T) {
+		if !authEnforced(t, client) {
+			t.Skip("the server does not enforce authentication")
+		}
+		own := connectTestClient(t, Config{URL: withoutCredentials(testMongoURL())})
+		_, err := open(own, "", dbName)
+		// Ping succeeds unauthenticated, so it has to be the access check that refuses.
+		if err == nil || !strings.HasPrefix(err.Error(), "mongo startup check failed: ") {
+			t.Errorf("open = %v, want the startup check to fail", err)
+		}
+		assertDisconnected(t, own)
+	})
+
+	t.Run("read-only user fails at the indexes", func(t *testing.T) {
+		if !authEnforced(t, client) {
+			t.Skip("the server does not enforce authorization")
+		}
+		own := connectTestClient(t, Config{URL: testMongoURL(), User: readOnlyUser, Password: password, AuthSource: dbName})
+		_, err := open(own, "", dbName)
+		if err == nil || !strings.HasPrefix(err.Error(), "create indexes: ") {
+			t.Errorf("open = %v, want index creation to fail", err)
+		}
+		assertDisconnected(t, own)
+	})
+}
+
+// createTestUser drops a user of the same name first, so that one left behind by
+// an aborted run cannot fail the next one.
+func createTestUser(t *testing.T, client *mongo.Client, dbName, user, password, role string) {
+	t.Helper()
+	db := client.Database(dbName)
+	var cmdErr mongo.CommandError
+	if err := db.RunCommand(t.Context(), bson.D{{Key: "dropUser", Value: user}}).Err(); err != nil &&
+		!(errors.As(err, &cmdErr) && cmdErr.Code == 11) { // 11: UserNotFound
+		t.Fatalf("dropUser %s: %v", user, err)
+	}
+	if err := db.RunCommand(t.Context(), bson.D{
+		{Key: "createUser", Value: user},
+		{Key: "pwd", Value: password},
+		{Key: "roles", Value: bson.A{bson.D{{Key: "role", Value: role}, {Key: "db", Value: dbName}}}},
+	}).Err(); err != nil {
+		t.Fatalf("createUser %s: %v", user, err)
+	}
+}
+
+func connectTestClient(t *testing.T, cfg Config) *mongo.Client {
+	t.Helper()
+	client, err := mongo.Connect(clientOptions(cfg))
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	return client
+}
+
+// authEnforced reads the server's own startup options rather than probing with
+// the mechanism under test.
+func authEnforced(t *testing.T, client *mongo.Client) bool {
+	t.Helper()
+	var opts struct {
+		Parsed struct {
+			Security struct {
+				Authorization string `bson:"authorization"`
+			} `bson:"security"`
+		} `bson:"parsed"`
+	}
+	if err := client.Database("admin").RunCommand(t.Context(), bson.D{{Key: "getCmdLineOpts", Value: 1}}).Decode(&opts); err != nil {
+		t.Fatalf("getCmdLineOpts: %v", err)
+	}
+	return opts.Parsed.Security.Authorization == "enabled"
+}
+
+// withoutCredentials drops the userinfo and the auth options from a connection
+// string. Reserved characters in the userinfo are percent-encoded, so the last
+// '@' before the path ends it; option names are case-insensitive.
+func withoutCredentials(uri string) string {
+	scheme, rest, ok := strings.Cut(uri, "://")
+	if !ok {
+		return uri
+	}
+	hostEnd := strings.IndexAny(rest, "/?")
+	if hostEnd < 0 {
+		hostEnd = len(rest)
+	}
+	if at := strings.LastIndex(rest[:hostEnd], "@"); at >= 0 {
+		rest = rest[at+1:]
+	}
+	base, query, hasQuery := strings.Cut(rest, "?")
+	if !hasQuery {
+		return scheme + "://" + rest
+	}
+	var kept []string
+	for _, opt := range strings.Split(query, "&") {
+		name, _, _ := strings.Cut(opt, "=")
+		switch strings.ToLower(name) {
+		case "authmechanism", "authsource", "authmechanismproperties":
+		default:
+			kept = append(kept, opt)
+		}
+	}
+	if len(kept) == 0 {
+		return scheme + "://" + base
+	}
+	return scheme + "://" + base + "?" + strings.Join(kept, "&")
+}
+
+func TestWithoutCredentials(t *testing.T) {
+	for in, want := range map[string]string{
+		"mongodb://root:pw@localhost:27017":                                                "mongodb://localhost:27017",
+		"mongodb://root:p%40w@a:1,b:2/?replicaSet=rs0":                                     "mongodb://a:1,b:2/?replicaSet=rs0",
+		"mongodb://localhost:27017/?appName=x@y":                                           "mongodb://localhost:27017/?appName=x@y",
+		"mongodb://localhost:27017":                                                        "mongodb://localhost:27017",
+		"mongodb://root:pw@localhost:27017/?authMechanism=SCRAM-SHA-256":                   "mongodb://localhost:27017/",
+		"mongodb://root:pw@h:1/?authSource=admin&replicaSet=rs0&AUTHMECHANISM=SCRAM-SHA-1": "mongodb://h:1/?replicaSet=rs0",
+		"mongodb://h:1/?authMechanismProperties=SERVICE_NAME:x&appName=a":                  "mongodb://h:1/?appName=a",
+	} {
+		if got := withoutCredentials(in); got != want {
+			t.Errorf("withoutCredentials(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

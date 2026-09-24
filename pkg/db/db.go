@@ -18,11 +18,13 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/lib"
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/pkg/util"
+	sb_config_types "github.com/SENERGY-Platform/go-service-base/config-hdl/types"
 	"github.com/SENERGY-Platform/go-service-base/struct-logger/attributes"
 	permV2Client "github.com/SENERGY-Platform/permissions-v2/pkg/client"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -36,13 +38,67 @@ type MongoDB struct {
 	client   *mongo.Client
 }
 
-func New(url string, database string) (*MongoDB, error) {
-	client, err := mongo.Connect(options.Client().
-		ApplyURI("mongodb://" + url).
-		SetMonitor(newCommandMonitor()))
+// Config is what New needs to reach the database. URL is a full connection
+// string including the scheme; an empty User means the client does not authenticate.
+type Config struct {
+	URL        string
+	User       string
+	Password   sb_config_types.Secret
+	AuthSource string
+	Database   string
+}
+
+// validate refuses values the config loader lets through: a variable that is set
+// but empty overwrites its default with "".
+func (cfg Config) validate() error {
+	if cfg.Database == "" {
+		return errors.New("MONGO_DATABASE is empty")
+	}
+	if cfg.User != "" && cfg.Password.Value() == "" {
+		return errors.New("MONGO_USER is set but MONGO_PASSWORD is empty")
+	}
+	return nil
+}
+
+// clientOptions passes the URL to the driver unchanged. A set User replaces any
+// credentials the URL carries, because SetAuth after ApplyURI overrides them.
+func clientOptions(cfg Config) *options.ClientOptions {
+	opts := options.Client().
+		ApplyURI(cfg.URL).
+		SetMonitor(newCommandMonitor())
+	if cfg.User != "" {
+		opts.SetAuth(options.Credential{
+			Username:   cfg.User,
+			Password:   cfg.Password.Value(),
+			AuthSource: cfg.AuthSource,
+		})
+	}
+	return opts
+}
+
+func New(cfg Config) (*MongoDB, error) {
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+	client, err := mongo.Connect(clientOptions(cfg))
 	if err != nil {
 		return nil, err
 	}
+	return open(client, cfg.URL, cfg.Database)
+}
+
+// open takes ownership of client and disconnects it on every failure, so a
+// failed start leaves no monitoring goroutines or pooled connections behind.
+func open(client *mongo.Client, url, database string) (_ *MongoDB, err error) {
+	defer func() {
+		if err != nil {
+			ctx, cf := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cf()
+			if dErr := client.Disconnect(ctx); dErr != nil {
+				util.Logger.Error("disconnecting after a failed start failed", attributes.ErrorKey, dErr)
+			}
+		}
+	}()
 	db := &MongoDB{
 		url:      url,
 		database: database,
@@ -55,10 +111,21 @@ func New(url string, database string) (*MongoDB, error) {
 	if err = client.Ping(timeout, nil); err != nil {
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
+	if err = db.checkAccess(timeout); err != nil {
+		return nil, fmt.Errorf("mongo startup check failed: %w", err)
+	}
 	if err = db.ensureIndexes(timeout); err != nil {
 		return nil, fmt.Errorf("create indexes: %w", err)
 	}
 	return db, nil
+}
+
+// checkAccess fails without valid authentication on a server that enforces it,
+// which ping does not: MongoDB answers ping unauthenticated.
+func (db *MongoDB) checkAccess(ctx context.Context) error {
+	_, err := db.client.Database(db.database).ListCollectionNames(ctx, bson.D{},
+		options.ListCollections().SetNameOnly(true).SetAuthorizedCollections(true))
+	return err
 }
 
 // ensureIndexes covers the two access patterns All relies on: sorting by name

@@ -19,15 +19,19 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	sb_util "github.com/SENERGY-Platform/go-service-base/util"
 )
 
 // envVars are every variable Config binds. The defaults test has to clear all of
 // them, or it would pass or fail depending on the shell it runs in.
 var envVars = []string{
 	"DEBUG", "SERVER_PORT", "LOGGER_CONFIG", "LOGGER_LEVEL", "MONGO_URL",
-	"MONGO_DATABASE", "HTTP_TIMEOUT", "PERMISSIONS_V2_URL", "URL_PREFIX",
+	"MONGO_USER", "MONGO_PASSWORD", "MONGO_AUTH_SOURCE", "MONGO_DATABASE",
+	"HTTP_TIMEOUT", "PERMISSIONS_V2_URL", "URL_PREFIX",
 }
 
 func clearEnv(t *testing.T) {
@@ -50,15 +54,21 @@ func TestNewDefaults(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	// The Dockerfile health check probes this port; the two have to agree.
 	if cfg.ServerPort != 8000 {
 		t.Errorf("ServerPort = %d, want 8000", cfg.ServerPort)
 	}
-	// The Dockerfile health check probes this port; the two have to agree.
-	if cfg.MongoUrl != "localhost:27017" {
-		t.Errorf("MongoUrl = %q, want localhost:27017", cfg.MongoUrl)
+	if cfg.MongoUrl != "mongodb://localhost:27017" {
+		t.Errorf("MongoUrl = %q, want mongodb://localhost:27017", cfg.MongoUrl)
 	}
-	if cfg.MongoDatabase != "db" {
-		t.Errorf("MongoDatabase = %q, want db", cfg.MongoDatabase)
+	if cfg.MongoUser != "" || cfg.MongoPassword.Value() != "" {
+		t.Errorf("MongoUser/MongoPassword set by default, want no authentication")
+	}
+	if cfg.MongoAuthSource != "admin" {
+		t.Errorf("MongoAuthSource = %q, want admin", cfg.MongoAuthSource)
+	}
+	if cfg.MongoDatabase != "analytics_operator_repo" {
+		t.Errorf("MongoDatabase = %q, want analytics_operator_repo", cfg.MongoDatabase)
 	}
 	if cfg.HttpTimeout != 30*time.Second {
 		t.Errorf("HttpTimeout = %v, want 30s", cfg.HttpTimeout)
@@ -99,6 +109,48 @@ func TestNewEnvOverrides(t *testing.T) {
 	}
 	if cfg.URLPrefix != "/analytics-operator-repo" {
 		t.Errorf("URLPrefix = %q, want /analytics-operator-repo", cfg.URLPrefix)
+	}
+}
+
+func TestNewMongoCredentialsFromEnv(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("MONGO_URL", "mongodb://mongo-0.example:27017,mongo-1.example:27017/?replicaSet=rs0")
+	t.Setenv("MONGO_USER", "analytics-operator-repo")
+	t.Setenv("MONGO_PASSWORD", "s3cret-pw")
+	t.Setenv("MONGO_AUTH_SOURCE", "users")
+
+	cfg, err := New("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.MongoUrl != "mongodb://mongo-0.example:27017,mongo-1.example:27017/?replicaSet=rs0" {
+		t.Errorf("MongoUrl = %q, want the variable unchanged", cfg.MongoUrl)
+	}
+	if cfg.MongoUser != "analytics-operator-repo" {
+		t.Errorf("MongoUser = %q, want analytics-operator-repo", cfg.MongoUser)
+	}
+	// Holds only while the Secret parser is registered in envTypeParser.
+	if cfg.MongoPassword.Value() != "s3cret-pw" {
+		t.Errorf("MongoPassword.Value() = %q, want the variable's value", cfg.MongoPassword.Value())
+	}
+	if cfg.MongoAuthSource != "users" {
+		t.Errorf("MongoAuthSource = %q, want users", cfg.MongoAuthSource)
+	}
+}
+
+func TestLoggedConfigHidesMongoPassword(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("MONGO_PASSWORD", "s3cret-pw")
+
+	cfg, err := New("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// main logs the config through exactly this call on every start.
+	if logged := sb_util.ToJsonStr(cfg); strings.Contains(logged, "s3cret-pw") {
+		t.Errorf("the logged config contains the password: %s", logged)
 	}
 }
 

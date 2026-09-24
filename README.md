@@ -15,13 +15,27 @@ environment wins over the file.
 | Variable | Default | Meaning |
 |---|---|---|
 | `SERVER_PORT` | `8000` | Port the HTTP server listens on |
-| `MONGO_URL` | `localhost:27017` | Host and port of the database, without a scheme |
-| `MONGO_DATABASE` | `db` | Database name inside that server |
+| `MONGO_URL` | `mongodb://localhost:27017` | Connection string including the scheme, passed to the driver unchanged |
+| `MONGO_USER` | empty | User to authenticate as. Empty means no authentication |
+| `MONGO_PASSWORD` | empty | Password of `MONGO_USER`. Masked in the logged config |
+| `MONGO_AUTH_SOURCE` | `admin` | Database `MONGO_USER` is defined in |
+| `MONGO_DATABASE` | `analytics_operator_repo` | Database the `operators` collection lives in |
 | `PERMISSIONS_V2_URL` | `http://permv2.permissions:8080` | Address of permissions-v2. The literal `mock` selects the in-process implementation instead, which needs no server |
 | `HTTP_TIMEOUT` | `30s` | Read and write timeout of the server, as a duration |
 | `URL_PREFIX` | empty | Prefix every route is mounted under, for running behind a gateway that does not strip it |
 | `LOGGER_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 | `DEBUG` | `false` | Verbose startup output |
+
+Keep credentials out of `MONGO_URL`. The URL is logged as it is at startup, and a
+set `MONGO_USER` replaces whatever credentials the URL carries.
+
+Startup refuses an empty `MONGO_DATABASE` and a `MONGO_USER` without
+`MONGO_PASSWORD`. After connecting it pings the server, which fails on a wrong
+password or auth source, and then lists the collections of `MONGO_DATABASE`. That
+access check is what makes missing credentials fail at startup: MongoDB answers a
+ping without authentication. It fails with `mongo startup check failed: ...`
+before the indexes are created; index creation would fail too, but later and
+with a less telling message.
 
 An empty `PERMISSIONS_V2_URL` is refused at startup rather than accepted: a
 client built for an empty address fails on every request instead, which is a much

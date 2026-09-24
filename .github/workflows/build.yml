@@ -60,7 +60,7 @@ jobs:
       # never ran once.
       - name: test
         env:
-          MONGO_TEST_URL: localhost:27017
+          MONGO_TEST_URL: mongodb://localhost:27017
           REQUIRE_MONGO: "1"
         run: go test -race ./...
       # Run rather than installed: go-licenses identifies the standard library by the
@@ -84,7 +84,7 @@ jobs:
       # back to the tool's own resolution rather than failing the release.
       - name: coverage_delta
         env:
-          MONGO_TEST_URL: localhost:27017
+          MONGO_TEST_URL: mongodb://localhost:27017
           REQUIRE_MONGO: "1"
           PUSHED_FROM: ${{ github.event.before }}
         run: |

@@ -42,7 +42,7 @@ import (
 const (
 	envTestMongoURL  = "MONGO_TEST_URL"
 	envRequireMongo  = "REQUIRE_MONGO"
-	defaultTestMongo = "localhost:27017"
+	defaultTestMongo = "mongodb://localhost:27017"
 )
 
 func TestMain(m *testing.M) {
@@ -134,7 +134,7 @@ func testDatabase(t *testing.T) *db.MongoDB {
 	t.Helper()
 	url := testMongoURL()
 	probe, err := mongo.Connect(options.Client().
-		ApplyURI("mongodb://" + url).
+		ApplyURI(url).
 		SetServerSelectionTimeout(2 * time.Second))
 	if err != nil {
 		t.Fatalf("build probe client: %v", err)
@@ -159,7 +159,7 @@ func testDatabase(t *testing.T) *db.MongoDB {
 		}
 	}, t.Name())
 
-	database, err := db.New(url, name)
+	database, err := db.New(db.Config{URL: url, Database: name})
 	if err != nil {
 		_ = probe.Disconnect(context.Background())
 		t.Fatalf("open database: %v", err)

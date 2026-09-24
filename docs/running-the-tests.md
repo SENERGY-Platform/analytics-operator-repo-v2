@@ -36,7 +36,7 @@ the resource is looked up, which would make every refusal case vacuous.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `MONGO_TEST_URL` | `localhost:27017` | Host and port of the database to test against |
+| `MONGO_TEST_URL` | `mongodb://localhost:27017` | Connection string of the database to test against, including the scheme |
 | `REQUIRE_MONGO` | unset | Set to any value: an unreachable database is a **failure** instead of a skip |
 
 Deliberately **not** `MONGO_URL`. That is the service's own variable, and a shell
@@ -50,10 +50,25 @@ Locally, an unreachable database skips:
 In a pipeline it must not, or the run goes green having never executed those
 tests, which no summary distinguishes from having passed them:
 
-    MONGO_TEST_URL=localhost:27017 REQUIRE_MONGO=1 go test -race ./...
+    MONGO_TEST_URL=mongodb://localhost:27017 REQUIRE_MONGO=1 go test -race ./...
 
 The strict mode is the one the pipeline opts into, never the one a developer has
 to remember.
+
+A `MONGO_TEST_URL` the driver cannot parse, such as the old `localhost:27017`
+without a scheme, is always a failure, not a skip.
+
+Against a server with authentication enabled, put its root credentials into
+`MONGO_TEST_URL`, as in the example below. The tests need them to create and drop
+databases, and the credential test creates its own users with them. Use a
+throwaway server only: the tests print the URL when they fail. Only on such a
+server does the credential test check that startup fails without credentials and
+with a read-only user; the pipeline's server does not enforce authentication, so
+there it skips those two cases.
+
+    docker run -d --rm -p 27100:27017 -e MONGO_INITDB_ROOT_USERNAME=root \
+        -e MONGO_INITDB_ROOT_PASSWORD=<password> mongo:8.2
+    MONGO_TEST_URL='mongodb://root:<password>@localhost:27100' REQUIRE_MONGO=1 go test -race ./...
 
 ## Isolation
 

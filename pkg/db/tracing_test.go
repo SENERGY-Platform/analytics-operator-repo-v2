@@ -130,7 +130,7 @@ func tracedRepo(t *testing.T) *MongoRepo {
 	t.Helper()
 	requireMongo(t)
 	name := testDatabaseName(t)
-	database, err := New(testMongoURL(), name)
+	database, err := New(Config{URL: testMongoURL(), Database: name})
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}

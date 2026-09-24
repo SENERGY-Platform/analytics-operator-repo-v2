@@ -76,7 +76,13 @@ func main() {
 		return
 	}
 
-	database, err := db.New(cfg.MongoUrl, cfg.MongoDatabase)
+	database, err := db.New(db.Config{
+		URL:        cfg.MongoUrl,
+		User:       cfg.MongoUser,
+		Password:   cfg.MongoPassword,
+		AuthSource: cfg.MongoAuthSource,
+		Database:   cfg.MongoDatabase,
+	})
 	if err != nil {
 		util.Logger.Error("error on db init", "error", err)
 		ec.Store(1)

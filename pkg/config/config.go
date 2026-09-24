@@ -20,17 +20,21 @@ import (
 	"time"
 
 	sb_config_hdl "github.com/SENERGY-Platform/go-service-base/config-hdl"
+	sb_config_types "github.com/SENERGY-Platform/go-service-base/config-hdl/types"
 )
 
 type Config struct {
-	Debug            bool          `json:"debug" env_var:"DEBUG"`
-	ServerPort       int           `json:"server_port" env_var:"SERVER_PORT"`
-	Logger           LoggerConfig  `json:"logger" env_var:"LOGGER_CONFIG"`
-	MongoUrl         string        `json:"mongo_url" env_var:"MONGO_URL"`
-	MongoDatabase    string        `json:"mongo_database" env_var:"MONGO_DATABASE"`
-	HttpTimeout      time.Duration `json:"http_timeout" env_var:"HTTP_TIMEOUT"`
-	PermissionsV2Url string        `json:"permissions_v2_url" env_var:"PERMISSIONS_V2_URL"`
-	URLPrefix        string        `json:"url_prefix" env_var:"URL_PREFIX"`
+	Debug            bool                   `json:"debug" env_var:"DEBUG"`
+	ServerPort       int                    `json:"server_port" env_var:"SERVER_PORT"`
+	Logger           LoggerConfig           `json:"logger" env_var:"LOGGER_CONFIG"`
+	MongoUrl         string                 `json:"mongo_url" env_var:"MONGO_URL"`
+	MongoUser        string                 `json:"mongo_user" env_var:"MONGO_USER"`
+	MongoPassword    sb_config_types.Secret `json:"mongo_password" env_var:"MONGO_PASSWORD"`
+	MongoAuthSource  string                 `json:"mongo_auth_source" env_var:"MONGO_AUTH_SOURCE"`
+	MongoDatabase    string                 `json:"mongo_database" env_var:"MONGO_DATABASE"`
+	HttpTimeout      time.Duration          `json:"http_timeout" env_var:"HTTP_TIMEOUT"`
+	PermissionsV2Url string                 `json:"permissions_v2_url" env_var:"PERMISSIONS_V2_URL"`
+	URLPrefix        string                 `json:"url_prefix" env_var:"URL_PREFIX"`
 	// OtelEndpoint is the OTLP collector traces are exported to. Empty means the
 	// in-cluster Jaeger the otelx default names, which is what every deployment
 	// uses; it is set explicitly only to export somewhere else.
@@ -44,8 +48,11 @@ type LoggerConfig struct {
 func New(path string) (*Config, error) {
 	cfg := Config{
 		ServerPort:       8000,
-		MongoUrl:         "localhost:27017",
-		MongoDatabase:    "db",
+		MongoUrl:         "mongodb://localhost:27017",
+		MongoUser:        "",
+		MongoPassword:    "",
+		MongoAuthSource:  "admin",
+		MongoDatabase:    "analytics_operator_repo",
 		Debug:            false,
 		Logger:           LoggerConfig{Level: "info"},
 		HttpTimeout:      30 * time.Second,
