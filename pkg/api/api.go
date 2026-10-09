@@ -146,6 +146,7 @@ func DiscardBaggageErrors() gin.HandlerFunc {
 // statusCode maps the sentinels from lib onto HTTP statuses. Anything it does
 // not recognise stays a 500, which is what ErrorHandler defaults to.
 func statusCode(err error) int {
+	var inUse *lib.InUseError
 	switch {
 	case errors.Is(err, lib.ErrInvalidInput):
 		return http.StatusBadRequest
@@ -153,6 +154,10 @@ func statusCode(err error) int {
 		return http.StatusForbidden
 	case errors.Is(err, lib.ErrNotFound):
 		return http.StatusNotFound
+	case errors.As(err, &inUse):
+		return http.StatusConflict
+	case errors.Is(err, lib.ErrFlowRepoUnavailable):
+		return http.StatusBadGateway
 	default:
 		return http.StatusInternalServerError
 	}
@@ -173,10 +178,30 @@ func logError(ctx context.Context, msg string, err error) {
 // text into the response body, so only the sentinels we built ourselves may pass
 // through; everything else could carry database or permission internals.
 func safeError(err error) error {
-	if errors.Is(err, lib.ErrInvalidInput) || errors.Is(err, lib.ErrMissingRights) || errors.Is(err, lib.ErrNotFound) {
+	var inUse *lib.InUseError
+	if errors.Is(err, lib.ErrInvalidInput) || errors.Is(err, lib.ErrMissingRights) || errors.Is(err, lib.ErrNotFound) ||
+		errors.Is(err, lib.ErrFlowRepoUnavailable) || errors.As(err, &inUse) {
 		return err
 	}
 	return errors.New(MessageSomethingWrong)
+}
+
+// isAdmin reads the admin role the way the flow repository does: the gateway's X-User-Roles
+// header when present, otherwise the realm roles of the token. A token that cannot be parsed
+// is not an admin.
+func isAdmin(c *gin.Context) bool {
+	if rolesHeader := c.GetHeader("X-User-Roles"); rolesHeader != "" {
+		return slices.Contains[[]string](strings.Split(rolesHeader, ", "), "admin")
+	}
+	if auth := c.GetHeader(HeaderAuthorization); auth != "" {
+		claims, err := jwt.Parse(auth)
+		if err != nil {
+			util.Logger.WarnContext(c.Request.Context(), "could not check the admin role", "error", err)
+			return false
+		}
+		return claims.IsAdmin()
+	}
+	return false
 }
 
 func AuthMiddleware() gin.HandlerFunc {

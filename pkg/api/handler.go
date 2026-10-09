@@ -17,9 +17,11 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/lib"
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/pkg/service"
@@ -148,14 +150,18 @@ func postOperatorHandler(srv service.Service) gin.HandlerFunc {
 
 // deleteOperator godoc
 // @Summary Delete operator
-// @Description	Deletes an operator
+// @Description	Deletes an operator. Refused with 409 while flows use it, unless an administrator passes force. Answers 502 when the flow repository cannot be asked; nothing is deleted then.
 // @Tags Operator
+// @Produce json
 // @Param id path string true "Operator ID"
+// @Param force query bool false "Administrators only: delete although flows still use the operator" default(false)
 // @Success	204
 // @Failure	400 {string} str
 // @Failure	403 {string} str
 // @Failure	404 {string} str
+// @Failure	409 {object} lib.InUseResponse
 // @Failure	500 {string} str
+// @Failure	502 {string} str
 // @Router /operator/{id} [delete]
 func deleteOperator(srv service.Service) (string, string, gin.HandlerFunc) {
 	return http.MethodDelete, "/operator/:id/", deleteOperatorHandler(srv)
@@ -169,27 +175,71 @@ func deleteOperatorAlias(srv service.Service) (string, string, gin.HandlerFunc) 
 
 func deleteOperatorHandler(srv service.Service) gin.HandlerFunc {
 	return func(gc *gin.Context) {
-		err := srv.DeleteOperator(gc.Request.Context(), gc.Param("id"), gc.GetHeader("Authorization"))
+		opts, err := deleteOptions(gc)
 		if err != nil {
 			logError(gc.Request.Context(), "error deleting operator", err)
 			_ = gc.Error(safeError(err))
+			return
+		}
+		err = srv.DeleteOperator(gc.Request.Context(), gc.Param("id"), gc.GetHeader("Authorization"), opts)
+		if err != nil {
+			deleteFailed(gc, "error deleting operator", err, false)
 			return
 		}
 		gc.Status(http.StatusNoContent)
 	}
 }
 
+// deleteOptions reads ?force from the request. Force skips the check for flows that use the
+// operator, so it is for administrators only.
+func deleteOptions(gc *gin.Context) (service.DeleteOptions, error) {
+	opts := service.DeleteOptions{UserId: gc.GetString(UserIdKey)}
+	raw := gc.Query("force")
+	if raw == "" {
+		return opts, nil
+	}
+	force, err := strconv.ParseBool(raw)
+	if err != nil {
+		return opts, fmt.Errorf("%w: force must be true or false", lib.ErrInvalidInput)
+	}
+	if force && !isAdmin(gc) {
+		return opts, fmt.Errorf("%w: force needs the admin role", lib.ErrMissingRights)
+	}
+	opts.Force = force
+	return opts, nil
+}
+
+// deleteFailed answers a failed delete. A refusal because flows use the operators carries their
+// usage in the body, which the error handler would reduce to text.
+func deleteFailed(gc *gin.Context, msg string, err error, batch bool) {
+	logError(gc.Request.Context(), msg, err)
+	var inUse *lib.InUseError
+	if !errors.As(err, &inUse) {
+		_ = gc.Error(safeError(err))
+		return
+	}
+	if batch {
+		gc.JSON(http.StatusConflict, lib.InUseBatchResponse{Error: inUse.Error(), Operators: inUse.Operators})
+		return
+	}
+	gc.JSON(http.StatusConflict, lib.InUseResponse{Error: inUse.Error(), OperatorUsage: inUse.Operators[0].OperatorUsage})
+}
+
 // deleteOperators godoc
 // @Summary Delete multiple operators
-// @Description	Deletes multiple operators
+// @Description	Deletes multiple operators, all or none. Refused with 409 naming each used operator while flows use any of them, unless an administrator passes force. Answers 502 when the flow repository cannot be asked; nothing is deleted then.
 // @Tags Operator
 // @Accept json
+// @Produce json
 // @Param request body []string true "ID list"
+// @Param force query bool false "Administrators only: delete although flows still use operators of the list" default(false)
 // @Success	204
 // @Failure	400 {string} str
 // @Failure	403 {string} str
 // @Failure	404 {string} str
+// @Failure	409 {object} lib.InUseBatchResponse
 // @Failure	500 {string} str
+// @Failure	502 {string} str
 // @Router /operator [delete]
 func deleteOperators(srv service.Service) (string, string, gin.HandlerFunc) {
 	return http.MethodDelete, "/operator", func(gc *gin.Context) {
@@ -200,10 +250,15 @@ func deleteOperators(srv service.Service) (string, string, gin.HandlerFunc) {
 			return
 		}
 
-		err := srv.DeleteOperators(gc.Request.Context(), request, gc.GetHeader("Authorization"))
+		opts, err := deleteOptions(gc)
 		if err != nil {
 			logError(gc.Request.Context(), "error deleting operators", err)
 			_ = gc.Error(safeError(err))
+			return
+		}
+		err = srv.DeleteOperators(gc.Request.Context(), request, gc.GetHeader("Authorization"), opts)
+		if err != nil {
+			deleteFailed(gc, "error deleting operators", err, true)
 			return
 		}
 		gc.Status(http.StatusNoContent)

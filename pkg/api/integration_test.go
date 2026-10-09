@@ -273,7 +273,7 @@ func createOperators(t *testing.T, engine *gin.Engine, names ...string) {
 func testEngine(t *testing.T) *gin.Engine {
 	t.Helper()
 	database := testDatabase(t)
-	srv, err := service.New(t.Context(), "mock", *database)
+	srv, err := service.New(t.Context(), "mock", "http://flow-repo.invalid", *database)
 	if err != nil {
 		t.Fatalf("build service: %v", err)
 	}

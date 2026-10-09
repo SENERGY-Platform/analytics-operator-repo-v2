@@ -72,8 +72,11 @@
                 }
             },
             "delete": {
-                "description": "Deletes multiple operators",
+                "description": "Deletes multiple operators, all or none. Refused with 409 naming each used operator while flows use any of them, unless an administrator passes force. Answers 502 when the flow repository cannot be asked; nothing is deleted then.",
                 "consumes": [
+                    "application/json"
+                ],
+                "produces": [
                     "application/json"
                 ],
                 "tags": [
@@ -92,6 +95,13 @@
                                 "type": "string"
                             }
                         }
+                    },
+                    {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Administrators only: delete although flows still use operators of the list",
+                        "name": "force",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -116,8 +126,20 @@
                             "type": "string"
                         }
                     },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/lib.InUseBatchResponse"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "type": "string"
                         }
@@ -275,7 +297,10 @@
                 }
             },
             "delete": {
-                "description": "Deletes an operator",
+                "description": "Deletes an operator. Refused with 409 while flows use it, unless an administrator passes force. Answers 502 when the flow repository cannot be asked; nothing is deleted then.",
+                "produces": [
+                    "application/json"
+                ],
                 "tags": [
                     "Operator"
                 ],
@@ -287,6 +312,13 @@
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Administrators only: delete although flows still use the operator",
+                        "name": "force",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -311,8 +343,20 @@
                             "type": "string"
                         }
                     },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/lib.InUseResponse"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "type": "string"
                         }
@@ -322,6 +366,48 @@
         }
     },
     "definitions": {
+        "lib.FlowRef": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "lib.InUseBatchResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "operators": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/lib.UsedOperator"
+                    }
+                }
+            }
+        },
+        "lib.InUseResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "flows": {
+                    "type": "integer"
+                },
+                "readable": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/lib.FlowRef"
+                    }
+                }
+            }
+        },
         "lib.Operator": {
             "type": "object",
             "required": [
@@ -392,6 +478,23 @@
                 },
                 "totalCount": {
                     "type": "integer"
+                }
+            }
+        },
+        "lib.UsedOperator": {
+            "type": "object",
+            "properties": {
+                "flows": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "readable": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/lib.FlowRef"
+                    }
                 }
             }
         },

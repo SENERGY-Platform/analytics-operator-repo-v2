@@ -107,7 +107,7 @@ func TestNewPermissionsClient(t *testing.T) {
 func TestNewWithMockPermissions(t *testing.T) {
 	database := testDatabase(t)
 
-	srv, err := New(t.Context(), "mock", *database)
+	srv, err := New(t.Context(), "mock", "http://flow-repo.invalid", *database)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

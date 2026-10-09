@@ -21,6 +21,7 @@ environment wins over the file.
 | `MONGO_AUTH_SOURCE` | `admin` | Database `MONGO_USER` is defined in |
 | `MONGO_DATABASE` | `analytics_operator_repo` | Database the `operators` collection lives in |
 | `PERMISSIONS_V2_URL` | `http://permv2.permissions:8080` | Address of permissions-v2. The literal `mock` selects the in-process implementation instead, which needs no server |
+| `FLOW_REPO_URL` | `http://api.analytics-flow-repo:5000` | Address of the flow repository, asked which flows use an operator before it is deleted. The in-cluster service; no path prefix. Empty is refused at startup |
 | `HTTP_TIMEOUT` | `30s` | Read and write timeout of the server, as a duration |
 | `URL_PREFIX` | empty | Prefix every route is mounted under, for running behind a gateway that does not strip it |
 | `LOGGER_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
@@ -40,6 +41,29 @@ with a less telling message.
 An empty `PERMISSIONS_V2_URL` is refused at startup rather than accepted: a
 client built for an empty address fails on every request instead, which is a much
 later place to notice a missing value.
+
+## Deleting an operator that flows use
+
+`DELETE /operator/{id}` and `DELETE /operator` first ask the flow repository
+(`GET /operators/{id}/usage`, with the caller's `Authorization` header) which
+flows use the operator. The flow repository counts the flows of all users and
+lists only those the caller may read.
+
+- Used: 409 with `{"error", "flows", "readable": [{"id", "name"}]}`. The batch
+  delete is all or nothing and answers `{"error", "operators": [{"id", "flows",
+  "readable"}]}`, naming each used operator; nothing is deleted.
+- The flow repository cannot be asked (network error, any status but 200, an
+  answer without a count): 502, nothing is deleted.
+- `?force=true` deletes anyway. It is for administrators only (role `admin` in
+  `X-User-Roles`, or in the token when the header is absent); anyone else gets
+  403. The usage is still read, so a forced delete is refused with 502 when the
+  flow repository is down. A forced delete of a used operator is logged at warn
+  with `operator_id`, `user_id` and `flows`.
+
+The check and the delete are not atomic: a flow saved between them is not seen.
+
+`PERMISSIONS_V2_URL=mock go run .` does not mock the flow repository; deletes
+need a reachable `FLOW_REPO_URL` there as well.
 
 ## Running it
 
