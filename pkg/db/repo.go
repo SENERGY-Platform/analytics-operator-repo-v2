@@ -39,6 +39,7 @@ import (
 type OperatorRepository interface {
 	InsertOperator(ctx context.Context, operator lib.Operator) (err error)
 	UpdateOperator(ctx context.Context, id string, operator lib.Operator, auth string) (err error)
+	PutOperatorVersion(ctx context.Context, id string, version lib.OperatorVersion, auth string) (created bool, err error)
 	DeleteOperator(ctx context.Context, id string, auth string) (err error)
 	DeleteOperators(ctx context.Context, ids []string, auth string) (err error)
 	All(ctx context.Context, userId string, admin bool, args map[string][]string, auth string) (response lib.OperatorResponse, err error)
@@ -140,6 +141,8 @@ func (r *MongoRepo) InsertOperator(ctx context.Context, operator lib.Operator) (
 	if operator.Id != nil {
 		operator.Id = nil
 	}
+	// Versions are written only through PutOperatorVersion, which validates them.
+	operator.Versions = nil
 	// Without the cancellation, with the trace: a client that hangs up mid-write
 	// would otherwise leave the document in place and the permission entry unwritten.
 	writeCtx := context.WithoutCancel(ctx)
@@ -222,7 +225,19 @@ func (r *MongoRepo) UpdateOperator(ctx context.Context, id string, operator lib.
 	if err != nil {
 		return
 	}
-	res := r.coll.FindOneAndUpdate(context.WithoutCancel(ctx), bson.M{"_id": objId}, bson.M{"$set": bson.M{
+	stored, err := r.findStored(ctx, objId)
+	if err != nil {
+		return err
+	}
+	return r.applyUpdate(ctx, objId, stored, operator)
+}
+
+// applyUpdate writes the update on top of the stored document it was derived from. An operator
+// with versions is written only while it still carries the revision read, because the top level
+// is computed from the stored versions. Without versions the last write wins as before, unless a
+// version was added since the read.
+func (r *MongoRepo) applyUpdate(ctx context.Context, objId bson.ObjectID, stored lib.Operator, operator lib.Operator) error {
+	set := bson.M{
 		"name":           operator.Name,
 		"description":    operator.Description,
 		"image":          operator.Image,
@@ -233,13 +248,95 @@ func (r *MongoRepo) UpdateOperator(ctx context.Context, id string, operator lib.
 		"outputs":        operator.Outputs,
 		"config_values":  operator.Config,
 		"dateUpdated":    time.Now(),
-	},
-		"$inc": bson.M{"version": 1},
-	})
-	if res.Err() != nil {
-		return notFound(res.Err())
 	}
-	return
+	// The body's versions are never read: they are only written by PutOperatorVersion.
+	if newest, ok := lib.NewestVersion(stored.Versions); ok {
+		if err := lib.CheckTopLevel(operator, newest); err != nil {
+			return err
+		}
+		setNewestVersion(set, newest)
+		return r.writeIf(ctx, bson.M{"_id": objId, "version": stored.Version}, set)
+	}
+	return r.writeIf(ctx, bson.M{"_id": objId, "versions.0": bson.M{"$exists": false}}, set)
+}
+
+// PutOperatorVersion adds the version or replaces the one with the same label, and moves the
+// top-level image, inputs, outputs and config_values to the newest version. created is true when
+// the label was new.
+func (r *MongoRepo) PutOperatorVersion(ctx context.Context, id string, version lib.OperatorVersion, auth string) (created bool, err error) {
+	ok, err, _ := r.perm.CheckPermissionContext(ctx, auth, PermV2InstanceTopic, id, permV2Client.Write)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, lib.ErrMissingRights
+	}
+
+	objId, err := objectID(id)
+	if err != nil {
+		return false, err
+	}
+	stored, err := r.findStored(ctx, objId)
+	if err != nil {
+		return false, err
+	}
+	return r.applyVersionPut(ctx, objId, stored, version)
+}
+
+// applyVersionPut is applyUpdate's counterpart for PutOperatorVersion, with the same revision filter.
+func (r *MongoRepo) applyVersionPut(ctx context.Context, objId bson.ObjectID, stored lib.Operator, version lib.OperatorVersion) (created bool, err error) {
+	versions, created, err := lib.PutVersion(stored.Versions, version)
+	if err != nil {
+		return false, err
+	}
+	newest, _ := lib.NewestVersion(versions)
+	set := bson.M{
+		"versions":    versions,
+		"dateUpdated": time.Now(),
+	}
+	setNewestVersion(set, newest)
+	if err = r.writeIf(ctx, bson.M{"_id": objId, "version": stored.Version}, set); err != nil {
+		return false, err
+	}
+	return created, nil
+}
+
+func setNewestVersion(set bson.M, newest lib.OperatorVersion) {
+	set["image"] = newest.Image
+	set["inputs"] = newest.Inputs
+	set["outputs"] = newest.Outputs
+	set["config_values"] = newest.Config
+}
+
+// findStored reads the whole document for the read-modify-write of an update.
+func (r *MongoRepo) findStored(ctx context.Context, objId bson.ObjectID) (operator lib.Operator, err error) {
+	if err = r.coll.FindOne(ctx, bson.M{"_id": objId}).Decode(&operator); err != nil {
+		return operator, notFound(err)
+	}
+	return operator, nil
+}
+
+// writeIf applies set and increments the revision if the document still matches filter. A nil
+// revision in filter matches a document without the field. Like the other writes it ignores the
+// client's cancellation.
+func (r *MongoRepo) writeIf(ctx context.Context, filter bson.M, set bson.M) error {
+	ctx = context.WithoutCancel(ctx)
+	res, err := r.coll.UpdateOne(ctx, filter, bson.M{"$set": set, "$inc": bson.M{"version": 1}})
+	if err != nil {
+		return err
+	}
+	if res.MatchedCount > 0 {
+		return nil
+	}
+	// No match means changed or deleted since the read; only the first is worth a retry.
+	n, err := r.coll.CountDocuments(ctx, bson.M{"_id": filter["_id"]})
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return lib.ErrNotFound
+	}
+	return lib.ErrConflict
 }
 
 func (r *MongoRepo) All(ctx context.Context, userId string, admin bool, args map[string][]string, auth string) (response lib.OperatorResponse, err error) {

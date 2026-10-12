@@ -149,7 +149,7 @@
         },
         "/operator/": {
             "put": {
-                "description": "Stores an operator",
+                "description": "Stores an operator. The versions field of the body is ignored; versions are stored through /operator/{id}/versions/{version}.",
                 "consumes": [
                     "application/json"
                 ],
@@ -240,7 +240,7 @@
                 }
             },
             "post": {
-                "description": "Validates and updates an operator",
+                "description": "Validates and updates an operator. For an operator with versions, image, inputs, outputs and config_values must equal those of the newest version or be empty; they are always taken from the newest version, and a different value is refused with 400. The versions field of the body is ignored. Answers 409 when the operator was changed concurrently; the request can be repeated.",
                 "consumes": [
                     "application/json"
                 ],
@@ -284,6 +284,12 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "type": "string"
                         }
@@ -357,6 +363,82 @@
                     },
                     "502": {
                         "description": "Bad Gateway",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/operator/{id}/versions/{version}": {
+            "put": {
+                "description": "Adds a version to an operator or replaces the version with the same label; deprecating a version is the same call with deprecated set. The label is vMAJOR.MINOR.PATCH, the image is required and may belong to one version of the operator only. The top-level image, inputs, outputs and config_values of the operator follow the highest version that is not deprecated, or the highest overall when all are. The first version turns an operator without versions into one with versions. The label in the path wins; a different non-empty version in the body is refused with 400. Answers 201 when the label is new and 200 when it replaced a version, and 409 when the operator was changed concurrently; the request can be repeated.",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Operator"
+                ],
+                "summary": "Put operator version",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Operator ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "example": "v1.2.0",
+                        "description": "Version label, vMAJOR.MINOR.PATCH",
+                        "name": "version",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Operator version",
+                        "name": "operatorVersion",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/lib.OperatorVersion"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "201": {
+                        "description": "Created"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "string"
                         }
@@ -464,6 +546,12 @@
                 },
                 "version": {
                     "type": "integer"
+                },
+                "versions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/lib.OperatorVersion"
+                    }
                 }
             }
         },
@@ -478,6 +566,38 @@
                 },
                 "totalCount": {
                     "type": "integer"
+                }
+            }
+        },
+        "lib.OperatorVersion": {
+            "type": "object",
+            "properties": {
+                "config_values": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/lib.Value"
+                    }
+                },
+                "deprecated": {
+                    "type": "boolean"
+                },
+                "image": {
+                    "type": "string"
+                },
+                "inputs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/lib.Value"
+                    }
+                },
+                "outputs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/lib.Value"
+                    }
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },

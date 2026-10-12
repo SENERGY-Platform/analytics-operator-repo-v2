@@ -17,6 +17,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -81,7 +82,7 @@ func getOperator(srv service.Service) (string, string, gin.HandlerFunc) {
 
 // putOperator godoc
 // @Summary Create operator
-// @Description	Stores an operator
+// @Description	Stores an operator. The versions field of the body is ignored; versions are stored through /operator/{id}/versions/{version}.
 // @Tags Operator
 // @Param operator body lib.Operator true "Create operator"
 // @Accept json
@@ -109,7 +110,7 @@ func putOperator(srv service.Service) (string, string, gin.HandlerFunc) {
 
 // postOperator godoc
 // @Summary Update operator
-// @Description	Validates and updates an operator
+// @Description	Validates and updates an operator. For an operator with versions, image, inputs, outputs and config_values must equal those of the newest version or be empty; they are always taken from the newest version, and a different value is refused with 400. The versions field of the body is ignored. Answers 409 when the operator was changed concurrently; the request can be repeated.
 // @Tags Operator
 // @Accept json
 // @Param id path string true "Operator ID"
@@ -118,6 +119,7 @@ func putOperator(srv service.Service) (string, string, gin.HandlerFunc) {
 // @Failure	400 {string} str
 // @Failure	403 {string} str
 // @Failure	404 {string} str
+// @Failure	409 {string} str
 // @Failure	500 {string} str
 // @Router /operator/{id} [post]
 func postOperator(srv service.Service) (string, string, gin.HandlerFunc) {
@@ -142,6 +144,59 @@ func postOperatorHandler(srv service.Service) gin.HandlerFunc {
 		if err != nil {
 			logError(gc.Request.Context(), "error updating operator", err)
 			_ = gc.Error(safeError(err))
+			return
+		}
+		gc.Status(http.StatusOK)
+	}
+}
+
+// putOperatorVersion godoc
+// @Summary Put operator version
+// @Description	Adds a version to an operator or replaces the version with the same label; deprecating a version is the same call with deprecated set. The label is vMAJOR.MINOR.PATCH, the image is required and may belong to one version of the operator only. The top-level image, inputs, outputs and config_values of the operator follow the highest version that is not deprecated, or the highest overall when all are. The first version turns an operator without versions into one with versions. The label in the path wins; a different non-empty version in the body is refused with 400. Answers 201 when the label is new and 200 when it replaced a version, and 409 when the operator was changed concurrently; the request can be repeated.
+// @Tags Operator
+// @Accept json
+// @Param id path string true "Operator ID"
+// @Param version path string true "Version label, vMAJOR.MINOR.PATCH" example(v1.2.0)
+// @Param operatorVersion body lib.OperatorVersion true "Operator version"
+// @Success	200
+// @Success	201
+// @Failure	400 {string} str
+// @Failure	403 {string} str
+// @Failure	404 {string} str
+// @Failure	409 {string} str
+// @Failure	500 {string} str
+// @Router /operator/{id}/versions/{version} [put]
+func putOperatorVersion(srv service.Service) (string, string, gin.HandlerFunc) {
+	return http.MethodPut, "/operator/:id/versions/:version", putOperatorVersionHandler(srv.PutOperatorVersion)
+}
+
+// versionPutter is the part of the service the version handler calls.
+type versionPutter func(ctx context.Context, id string, version lib.OperatorVersion, auth string) (created bool, err error)
+
+func putOperatorVersionHandler(put versionPutter) gin.HandlerFunc {
+	return func(gc *gin.Context) {
+		var request lib.OperatorVersion
+		if err := gc.ShouldBindJSON(&request); err != nil {
+			util.Logger.WarnContext(gc.Request.Context(), "error putting operator version", "error", err)
+			_ = gc.Error(fmt.Errorf("%w: malformed request body", lib.ErrInvalidInput))
+			return
+		}
+		label := gc.Param("version")
+		if request.Version != "" && request.Version != label {
+			err := fmt.Errorf("%w: version in the body differs from the one in the path", lib.ErrInvalidInput)
+			logError(gc.Request.Context(), "error putting operator version", err)
+			_ = gc.Error(err)
+			return
+		}
+		request.Version = label
+		created, err := put(gc.Request.Context(), gc.Param("id"), request, gc.GetHeader("Authorization"))
+		if err != nil {
+			logError(gc.Request.Context(), "error putting operator version", err)
+			_ = gc.Error(safeError(err))
+			return
+		}
+		if created {
+			gc.Status(http.StatusCreated)
 			return
 		}
 		gc.Status(http.StatusOK)

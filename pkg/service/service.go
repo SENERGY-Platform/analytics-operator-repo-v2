@@ -92,6 +92,10 @@ func (s *Service) UpdateOperator(ctx context.Context, id string, operator lib.Op
 	return s.dbRepo.UpdateOperator(ctx, id, operator, auth)
 }
 
+func (s *Service) PutOperatorVersion(ctx context.Context, id string, version lib.OperatorVersion, auth string) (created bool, err error) {
+	return s.dbRepo.PutOperatorVersion(ctx, id, version, auth)
+}
+
 func (s *Service) DeleteOperator(ctx context.Context, id string, auth string, opts DeleteOptions) (err error) {
 	used, err := s.usedBy(ctx, []string{id}, auth, opts)
 	if err != nil {

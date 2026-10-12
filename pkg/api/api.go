@@ -154,7 +154,7 @@ func statusCode(err error) int {
 		return http.StatusForbidden
 	case errors.Is(err, lib.ErrNotFound):
 		return http.StatusNotFound
-	case errors.As(err, &inUse):
+	case errors.Is(err, lib.ErrConflict), errors.As(err, &inUse):
 		return http.StatusConflict
 	case errors.Is(err, lib.ErrFlowRepoUnavailable):
 		return http.StatusBadGateway
@@ -180,7 +180,7 @@ func logError(ctx context.Context, msg string, err error) {
 func safeError(err error) error {
 	var inUse *lib.InUseError
 	if errors.Is(err, lib.ErrInvalidInput) || errors.Is(err, lib.ErrMissingRights) || errors.Is(err, lib.ErrNotFound) ||
-		errors.Is(err, lib.ErrFlowRepoUnavailable) || errors.As(err, &inUse) {
+		errors.Is(err, lib.ErrConflict) || errors.Is(err, lib.ErrFlowRepoUnavailable) || errors.As(err, &inUse) {
 		return err
 	}
 	return errors.New(MessageSomethingWrong)

@@ -28,20 +28,32 @@ type OperatorResponse struct {
 }
 
 type Operator struct {
-	Id             *bson.ObjectID `bson:"_id,omitempty" json:"_id,omitempty"`
-	Name           string         `json:"name,omitempty" binding:"required"`
-	Image          string         `json:"image,omitempty"`
-	Description    string         `json:"description,omitempty"`
-	DeploymentType string         `bson:"deploymentType" json:"deploymentType,omitempty"`
-	Cost           *int64         `json:"cost,omitempty"`
-	UserId         string         `bson:"userId" json:"userId,omitempty"`
-	Pub            bool           `json:"pub,omitempty"`
-	Config         []Value        `bson:"config_values" json:"config_values,omitempty"`
-	Inputs         []Value        `json:"inputs,omitempty"`
-	Outputs        []Value        `json:"outputs,omitempty"`
-	Version        *int64         `bson:"version" json:"version,omitempty"`
-	DateCreated    time.Time      `bson:"dateCreated,omitempty" json:"dateCreated,omitempty"`
-	DateUpdated    time.Time      `bson:"dateUpdated,omitempty" json:"dateUpdated,omitempty"`
+	Id             *bson.ObjectID    `bson:"_id,omitempty" json:"_id,omitempty"`
+	Name           string            `json:"name,omitempty" binding:"required"`
+	Image          string            `json:"image,omitempty"`
+	Description    string            `json:"description,omitempty"`
+	DeploymentType string            `bson:"deploymentType" json:"deploymentType,omitempty"`
+	Cost           *int64            `json:"cost,omitempty"`
+	UserId         string            `bson:"userId" json:"userId,omitempty"`
+	Pub            bool              `json:"pub,omitempty"`
+	Config         []Value           `bson:"config_values" json:"config_values,omitempty"`
+	Inputs         []Value           `json:"inputs,omitempty"`
+	Outputs        []Value           `json:"outputs,omitempty"`
+	Version        *int64            `bson:"version" json:"version,omitempty"`
+	Versions       []OperatorVersion `bson:"versions,omitempty" json:"versions,omitempty"`
+	DateCreated    time.Time         `bson:"dateCreated,omitempty" json:"dateCreated,omitempty"`
+	DateUpdated    time.Time         `bson:"dateUpdated,omitempty" json:"dateUpdated,omitempty"`
+}
+
+// OperatorVersion is one release of an operator. Operator.Version stays the revision counter
+// of the document; Version here is the label, vMAJOR.MINOR.PATCH.
+type OperatorVersion struct {
+	Version    string  `bson:"version" json:"version"`
+	Image      string  `bson:"image" json:"image"`
+	Inputs     []Value `bson:"inputs" json:"inputs"`
+	Outputs    []Value `bson:"outputs" json:"outputs"`
+	Config     []Value `bson:"config_values" json:"config_values"`
+	Deprecated bool    `bson:"deprecated" json:"deprecated"`
 }
 
 type Value struct {
