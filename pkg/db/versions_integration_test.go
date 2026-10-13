@@ -372,7 +372,7 @@ func TestIntegrationUpdateOfAnOperatorWithoutARevision(t *testing.T) {
 func TestIntegrationVersionsInTheBodyAreIgnoredOnInsertAndUpdate(t *testing.T) {
 	repo, coll := testRepo(t)
 	body := lib.Operator{Name: "alpha", UserId: "user-a", Image: "img:top", Versions: []lib.OperatorVersion{versionOf("v1.0.0", "img:1")}}
-	if err := repo.InsertOperator(t.Context(), body); err != nil {
+	if _, err := repo.InsertOperator(t.Context(), body); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
 	id := idOf(t, coll, "alpha")

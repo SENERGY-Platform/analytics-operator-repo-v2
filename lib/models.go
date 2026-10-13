@@ -27,6 +27,11 @@ type OperatorResponse struct {
 	Total     int64      `json:"totalCount"`
 }
 
+// OperatorCreateResponse is the body of the answer to PUT /operator/.
+type OperatorCreateResponse struct {
+	Id string `json:"_id"`
+}
+
 type Operator struct {
 	Id             *bson.ObjectID    `bson:"_id,omitempty" json:"_id,omitempty"`
 	Name           string            `json:"name,omitempty" binding:"required"`

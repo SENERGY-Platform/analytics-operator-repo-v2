@@ -86,25 +86,33 @@ func getOperator(srv service.Service) (string, string, gin.HandlerFunc) {
 // @Tags Operator
 // @Param operator body lib.Operator true "Create operator"
 // @Accept json
-// @Success	201
+// @Produce json
+// @Success	201 {object} lib.OperatorCreateResponse
 // @Failure	400 {string} str
 // @Failure	500 {string} str
 // @Router /operator/ [put]
 func putOperator(srv service.Service) (string, string, gin.HandlerFunc) {
-	return http.MethodPut, "/operator/", func(gc *gin.Context) {
+	return http.MethodPut, "/operator/", putOperatorHandler(srv.CreateOperator)
+}
+
+// operatorCreator is the part of the service the create handler calls.
+type operatorCreator func(ctx context.Context, operator lib.Operator, userId string) (id string, err error)
+
+func putOperatorHandler(create operatorCreator) gin.HandlerFunc {
+	return func(gc *gin.Context) {
 		var request lib.Operator
 		if err := gc.ShouldBindJSON(&request); err != nil {
 			util.Logger.WarnContext(gc.Request.Context(), "error creating operator", "error", err)
 			_ = gc.Error(fmt.Errorf("%w: malformed request body", lib.ErrInvalidInput))
 			return
 		}
-		err := srv.CreateOperator(gc.Request.Context(), request, gc.GetString(UserIdKey))
+		id, err := create(gc.Request.Context(), request, gc.GetString(UserIdKey))
 		if err != nil {
 			logError(gc.Request.Context(), "error creating operator", err)
 			_ = gc.Error(safeError(err))
 			return
 		}
-		gc.Status(http.StatusCreated)
+		gc.JSON(http.StatusCreated, lib.OperatorCreateResponse{Id: id})
 	}
 }
 

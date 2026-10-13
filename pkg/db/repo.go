@@ -37,7 +37,7 @@ import (
 )
 
 type OperatorRepository interface {
-	InsertOperator(ctx context.Context, operator lib.Operator) (err error)
+	InsertOperator(ctx context.Context, operator lib.Operator) (id string, err error)
 	UpdateOperator(ctx context.Context, id string, operator lib.Operator, auth string) (err error)
 	PutOperatorVersion(ctx context.Context, id string, version lib.OperatorVersion, auth string) (created bool, err error)
 	DeleteOperatorVersion(ctx context.Context, id string, label string, auth string, check func(lib.OperatorVersion) error) (err error)
@@ -129,7 +129,9 @@ func (r *MongoRepo) ValidateOperatorPermissions(ctx context.Context) (err error)
 	return
 }
 
-func (r *MongoRepo) InsertOperator(ctx context.Context, operator lib.Operator) (err error) {
+// InsertOperator stores the operator and returns its new id, hex encoded. The id is also
+// returned when only the permission entry could not be written, because the document exists then.
+func (r *MongoRepo) InsertOperator(ctx context.Context, operator lib.Operator) (id string, err error) {
 	operator.DateCreated = time.Now()
 	operator.DateUpdated = time.Now()
 	version := int64(1)
@@ -150,10 +152,10 @@ func (r *MongoRepo) InsertOperator(ctx context.Context, operator lib.Operator) (
 	writeCtx := context.WithoutCancel(ctx)
 	result, err := r.coll.InsertOne(writeCtx, operator)
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	id := result.InsertedID.(bson.ObjectID).Hex()
+	id = result.InsertedID.(bson.ObjectID).Hex()
 	_, err, _ = r.perm.SetPermissionContext(writeCtx, permV2Client.InternalAdminToken, PermV2InstanceTopic, id, permissions)
 	return
 }

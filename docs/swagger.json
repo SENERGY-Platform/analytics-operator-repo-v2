@@ -153,6 +153,9 @@
                 "consumes": [
                     "application/json"
                 ],
+                "produces": [
+                    "application/json"
+                ],
                 "tags": [
                     "Operator"
                 ],
@@ -170,7 +173,10 @@
                 ],
                 "responses": {
                     "201": {
-                        "description": "Created"
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/lib.OperatorCreateResponse"
+                        }
                     },
                     "400": {
                         "description": "Bad Request",
@@ -636,6 +642,14 @@
                     "items": {
                         "$ref": "#/definitions/lib.OperatorVersion"
                     }
+                }
+            }
+        },
+        "lib.OperatorCreateResponse": {
+            "type": "object",
+            "properties": {
+                "_id": {
+                    "type": "string"
                 }
             }
         },

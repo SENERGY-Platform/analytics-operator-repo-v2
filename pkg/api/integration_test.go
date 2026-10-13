@@ -247,6 +247,46 @@ func getOperators(t *testing.T, engine *gin.Engine, target string, userId string
 	return resp
 }
 
+// TestIntegrationPutOperatorReturnsTheStoredId checks that the id in the 201 body
+// is the one the operator is stored under, so that a client can create its first
+// version and a second save does not create a duplicate.
+func TestIntegrationPutOperatorReturnsTheStoredId(t *testing.T) {
+	engine := testEngine(t)
+	createOperators(t, engine, "other")
+
+	body, err := json.Marshal(lib.Operator{Name: "alpha"})
+	if err != nil {
+		t.Fatalf("marshal operator: %v", err)
+	}
+	rec := send(t, engine, http.MethodPut, "/operator/", string(body), "user-a")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("PUT /operator/ = %d, want 201 (body %q)", rec.Code, rec.Body.String())
+	}
+	var created lib.OperatorCreateResponse
+	if err = json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode %q: %v", rec.Body.String(), err)
+	}
+	if created.Id == "" {
+		t.Fatalf("no id in %q", rec.Body.String())
+	}
+
+	var stored string
+	for _, op := range getOperators(t, engine, "/operator", "user-a").Operators {
+		if op.Name == "alpha" {
+			stored = op.Id.Hex()
+		}
+	}
+	if created.Id != stored {
+		t.Errorf("returned id %q, stored id %q", created.Id, stored)
+	}
+
+	// The returned id addresses the operator: the first version goes under it.
+	rec = send(t, engine, http.MethodPut, "/operator/"+created.Id+"/versions/v1.0.0", `{"image":"img:1"}`, "user-a")
+	if rec.Code != http.StatusCreated {
+		t.Errorf("PUT version under the returned id = %d, want 201 (body %q)", rec.Code, rec.Body.String())
+	}
+}
+
 func createOperators(t *testing.T, engine *gin.Engine, names ...string) {
 	t.Helper()
 	for _, name := range names {

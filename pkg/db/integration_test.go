@@ -194,14 +194,14 @@ func userToken(t *testing.T, userId string, roles ...string) string {
 func insert(t *testing.T, repo *MongoRepo, userId string, names ...string) {
 	t.Helper()
 	for _, name := range names {
-		if err := repo.InsertOperator(t.Context(), lib.Operator{Name: name, UserId: userId}); err != nil {
+		if _, err := repo.InsertOperator(t.Context(), lib.Operator{Name: name, UserId: userId}); err != nil {
 			t.Fatalf("insert %q: %v", name, err)
 		}
 	}
 }
 
-// idOf reads an operator's id straight from the collection, because InsertOperator
-// does not report it — a gap the API inherits.
+// idOf reads an operator's id straight from the collection by name, so that tests
+// can address an operator they inserted through insert.
 func idOf(t *testing.T, coll *mongo.Collection, name string) string {
 	t.Helper()
 	var op lib.Operator
@@ -220,6 +220,36 @@ func names(ops []lib.Operator) []string {
 		out = append(out, op.Name)
 	}
 	return out
+}
+
+func TestIntegrationInsertReturnsTheStoredId(t *testing.T) {
+	repo, coll := testRepo(t)
+	first, err := repo.InsertOperator(t.Context(), lib.Operator{Name: "alpha", UserId: "user-a"})
+	if err != nil {
+		t.Fatalf("insert alpha: %v", err)
+	}
+	second, err := repo.InsertOperator(t.Context(), lib.Operator{Name: "bravo", UserId: "user-a"})
+	if err != nil {
+		t.Fatalf("insert bravo: %v", err)
+	}
+
+	if want := idOf(t, coll, "alpha"); first != want {
+		t.Errorf("alpha: returned id %q, stored id %q", first, want)
+	}
+	if want := idOf(t, coll, "bravo"); second != want {
+		t.Errorf("bravo: returned id %q, stored id %q", second, want)
+	}
+	if first == second {
+		t.Errorf("both inserts returned %q", first)
+	}
+	// The id is also what permissions and reads use, not just the document key.
+	op, err := repo.FindOperator(t.Context(), first, userToken(t, "user-a"))
+	if err != nil {
+		t.Fatalf("find by the returned id: %v", err)
+	}
+	if op.Name != "alpha" {
+		t.Errorf("name = %q, want alpha", op.Name)
+	}
 }
 
 func TestIntegrationInsertAndFind(t *testing.T) {
@@ -380,7 +410,7 @@ func TestIntegrationWritesSurviveACancelledRequest(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	if err := repo.InsertOperator(ctx, lib.Operator{Name: "alpha", UserId: "user-a"}); err != nil {
+	if _, err := repo.InsertOperator(ctx, lib.Operator{Name: "alpha", UserId: "user-a"}); err != nil {
 		t.Fatalf("insert on a cancelled context: %v", err)
 	}
 	count, err := coll.CountDocuments(t.Context(), bson.M{})

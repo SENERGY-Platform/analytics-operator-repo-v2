@@ -94,7 +94,7 @@ func newPermissionsClient(ctx context.Context, url string) (permV2Client.Client,
 	return permV2Client.New(url), nil
 }
 
-func (s *Service) CreateOperator(ctx context.Context, operator lib.Operator, userId string) (err error) {
+func (s *Service) CreateOperator(ctx context.Context, operator lib.Operator, userId string) (id string, err error) {
 	operator.UserId = userId
 	return s.dbRepo.InsertOperator(ctx, operator)
 }

@@ -116,7 +116,8 @@ func TestNewWithMockPermissions(t *testing.T) {
 	}
 
 	// A round trip proves the wiring, not just that the constructor returned.
-	if err = srv.CreateOperator(t.Context(), operator("alpha"), "user-a"); err != nil {
+	id, err := srv.CreateOperator(t.Context(), operator("alpha"), "user-a")
+	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	resp, err := srv.GetOperators(t.Context(), "user-a", map[string][]string{}, userToken(t, "user-a"))
@@ -125,6 +126,8 @@ func TestNewWithMockPermissions(t *testing.T) {
 	}
 	if len(resp.Operators) != 1 || resp.Operators[0].Name != "alpha" {
 		t.Errorf("listed %d operators (%v), want the one that was created", len(resp.Operators), resp.Operators)
+	} else if resp.Operators[0].Id == nil || resp.Operators[0].Id.Hex() != id {
+		t.Errorf("created id %q, listed id %v", id, resp.Operators[0].Id)
 	}
 }
 
