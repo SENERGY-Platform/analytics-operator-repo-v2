@@ -288,3 +288,45 @@ func TestDeleteFailedKeepsRedactingOtherErrors(t *testing.T) {
 		t.Errorf("status = %d, body %q", rec.Code, rec.Body.String())
 	}
 }
+
+// TestIntegrationDeleteWithoutRightsAsksNoUsage runs the delete through the real handler, service,
+// permissions and database, with usage stubs that would answer 409 if they were asked. A caller
+// without the Administrate permission must get 403 and leave the stubs unasked.
+func TestIntegrationDeleteWithoutRightsAsksNoUsage(t *testing.T) {
+	flows, flowsURL := newUsageServer(t, map[string]string{"": `{"flows":2,"readable":[]}`})
+	pipelines, pipelinesURL := newUsageServer(t, map[string]string{"": `{"pipelines":1,"readable":[]}`})
+	engine := testEngineWith(t, flowsURL, pipelinesURL)
+	createOperators(t, engine, "alpha", "bravo")
+	var ids []string
+	for _, op := range getOperators(t, engine, "/operator", "user-a").Operators {
+		ids = append(ids, op.Id.Hex())
+	}
+	batch, err := json.Marshal(ids)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	requests := []struct{ name, method, target, body string }{
+		{"single", http.MethodDelete, "/operator/" + ids[0], ""},
+		{"single with a trailing slash", http.MethodDelete, "/operator/" + ids[0] + "/", ""},
+		{"single, forced", http.MethodDelete, "/operator/" + ids[0] + "?force=true", ""},
+		{"batch", http.MethodDelete, "/operator", string(batch)},
+		{"batch, forced", http.MethodDelete, "/operator?force=true", string(batch)},
+	}
+	for _, tc := range requests {
+		if rec := send(t, engine, tc.method, tc.target, tc.body, "user-b"); rec.Code != http.StatusForbidden {
+			t.Errorf("%s = %d, want 403 (body %q)", tc.name, rec.Code, rec.Body.String())
+		}
+	}
+	if got := append(flows.asked(), pipelines.asked()...); len(got) != 0 {
+		t.Errorf("usage was asked for a caller without rights: %v", got)
+	}
+
+	// A caller with rights still gets the usage; the stubs answer for it.
+	if rec := send(t, engine, http.MethodDelete, "/operator/"+ids[0], "", "user-a"); rec.Code != http.StatusConflict {
+		t.Errorf("owner = %d, want 409 (body %q)", rec.Code, rec.Body.String())
+	}
+	if len(flows.asked()) == 0 || len(pipelines.asked()) == 0 {
+		t.Errorf("the owner's delete did not ask the usage: flows %v, pipelines %v", flows.asked(), pipelines.asked())
+	}
+}

@@ -107,7 +107,13 @@ func (s *Service) PutOperatorVersion(ctx context.Context, id string, version lib
 	return s.dbRepo.PutOperatorVersion(ctx, id, version, auth)
 }
 
+// DeleteOperator checks the Administrate permission before the usage is asked: the usage counts
+// cover all users, so an answer to a caller without rights would disclose them. The database layer
+// checks again on delete, because the usage check and the delete are not atomic.
 func (s *Service) DeleteOperator(ctx context.Context, id string, auth string, opts DeleteOptions) (err error) {
+	if err = s.dbRepo.CheckAdministrate(ctx, []string{id}, auth); err != nil {
+		return err
+	}
 	used, err := s.usedBy(ctx, []string{id}, auth, opts)
 	if err != nil {
 		return err
@@ -120,8 +126,11 @@ func (s *Service) DeleteOperator(ctx context.Context, id string, auth string, op
 }
 
 // DeleteOperators refuses the whole batch when flows or pipelines use any of the operators, unless
-// opts.Force is set.
+// opts.Force is set. The Administrate permission of every id is checked first, as in DeleteOperator.
 func (s *Service) DeleteOperators(ctx context.Context, ids []string, auth string, opts DeleteOptions) (err error) {
+	if err = s.dbRepo.CheckAdministrate(ctx, ids, auth); err != nil {
+		return err
+	}
 	used, err := s.usedBy(ctx, ids, auth, opts)
 	if err != nil {
 		return err

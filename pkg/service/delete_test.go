@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -90,6 +91,14 @@ type fakeOperators struct {
 	versions        []lib.OperatorVersion
 	deletedVersions []string
 	err             error
+	// denied is what CheckAdministrate answers; checked records the ids it was asked about.
+	denied  error
+	checked [][]string
+}
+
+func (f *fakeOperators) CheckAdministrate(_ context.Context, ids []string, _ string) error {
+	f.checked = append(f.checked, ids)
+	return f.denied
 }
 
 func (f *fakeOperators) DeleteOperator(_ context.Context, id string, _ string) error {
@@ -621,5 +630,56 @@ func TestDeleteOperatorVersionRefusalsBeforeTheUsageIsAsked(t *testing.T) {
 				t.Errorf("deleted %v", tc.repo.deletedVersions)
 			}
 		})
+	}
+}
+
+// The usage counts cover all users, so a caller without the Administrate permission must be refused
+// before either service is asked.
+func TestDeleteWithoutRightsAsksNoUsage(t *testing.T) {
+	for _, force := range []bool{false, true} {
+		t.Run(map[bool]string{false: "plain", true: "forced"}[force], func(t *testing.T) {
+			denied := fmt.Errorf("%w: id op-2", lib.ErrMissingRights)
+			// Used operators: the usage would be a 409 if it were asked.
+			flows := &fakeFlows{usage: map[string]lib.OperatorUsage{"op-1": used(3, "f"), "op-2": used(1)}}
+			pipelines := &fakePipelines{usage: map[string]lib.PipelineUsage{"op-1": run(2)}}
+			repo := &fakeOperators{denied: denied}
+			srv := &Service{dbRepo: repo, flows: flows, pipelines: pipelines}
+			opts := DeleteOptions{Force: force}
+
+			single := srv.DeleteOperator(t.Context(), "op-1", "Bearer a", opts)
+			batch := srv.DeleteOperators(t.Context(), []string{"op-1", "op-2"}, "Bearer a", opts)
+
+			for _, err := range []error{single, batch} {
+				if !errors.Is(err, lib.ErrMissingRights) {
+					t.Errorf("err = %v, want lib.ErrMissingRights", err)
+				}
+			}
+			if len(flows.asked) != 0 || len(pipelines.asked) != 0 {
+				t.Errorf("usage asked: flows %v, pipelines %v", flows.asked, pipelines.asked)
+			}
+			if len(repo.deleted) != 0 {
+				t.Errorf("deleted %v", repo.deleted)
+			}
+			if want := [][]string{{"op-1"}, {"op-1", "op-2"}}; !slices.EqualFunc(repo.checked, want, slices.Equal) {
+				t.Errorf("permission checked for %v, want %v", repo.checked, want)
+			}
+		})
+	}
+}
+
+// The permission check does not replace the usage check: a caller with rights still gets the 409.
+func TestDeleteWithRightsStillAsksTheUsage(t *testing.T) {
+	flows := &fakeFlows{usage: map[string]lib.OperatorUsage{"op-1": used(1, "f")}}
+	repo := &fakeOperators{}
+	srv := &Service{dbRepo: repo, flows: flows, pipelines: noPipelines()}
+
+	err := srv.DeleteOperators(t.Context(), []string{"op-1", "op-2"}, "Bearer a", DeleteOptions{})
+
+	var inUse *lib.InUseError
+	if !errors.As(err, &inUse) {
+		t.Fatalf("err = %v, want *lib.InUseError", err)
+	}
+	if !slices.Equal(flows.asked, []string{"op-1", "op-2"}) {
+		t.Errorf("flow repository was asked about %v", flows.asked)
 	}
 }

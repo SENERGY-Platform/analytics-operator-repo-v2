@@ -45,7 +45,9 @@ later place to notice a missing value.
 
 ## Deleting an operator that flows or pipelines use
 
-`DELETE /operator/{id}` and `DELETE /operator` first ask, for every id and with
+`DELETE /operator/{id}` and `DELETE /operator` first check the caller's
+Administrate permission on every id; without it the answer is 403 and nothing is
+asked, because the usage counts cover all users. They then ask, for every id and with
 the caller's `Authorization` header, the flow repository
 (`GET /operators/{id}/usage`) which flows use the operator and the pipeline
 registry (`GET /pipeline/statistics/operatorusage/{id}`) which pipelines run it.

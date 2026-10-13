@@ -991,3 +991,39 @@ func TestWithoutCredentials(t *testing.T) {
 		}
 	}
 }
+
+func TestIntegrationCheckAdministrate(t *testing.T) {
+	repo, coll := testRepo(t)
+	insert(t, repo, "user-a", "alpha", "bravo")
+	insert(t, repo, "user-b", "charlie")
+	alpha := idOf(t, coll, "alpha")
+	bravo := idOf(t, coll, "bravo")
+	charlie := idOf(t, coll, "charlie")
+
+	tests := []struct {
+		name string
+		ids  []string
+		user string
+		deny bool
+	}{
+		{"owner of one id", []string{alpha}, "user-a", false},
+		{"owner of all ids", []string{alpha, bravo}, "user-a", false},
+		{"other user, one id", []string{alpha}, "user-b", true},
+		{"one id of the batch belongs to another user", []string{alpha, charlie}, "user-a", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := repo.CheckAdministrate(t.Context(), tc.ids, userToken(t, tc.user))
+			if tc.deny && !errors.Is(err, lib.ErrMissingRights) {
+				t.Errorf("error = %v, want ErrMissingRights", err)
+			}
+			if !tc.deny && err != nil {
+				t.Errorf("error = %v, want none", err)
+			}
+		})
+	}
+	// The check reads and never deletes.
+	if n, err := coll.CountDocuments(context.Background(), bson.M{}); err != nil || n != 3 {
+		t.Errorf("%d documents left (err %v), want 3", n, err)
+	}
+}

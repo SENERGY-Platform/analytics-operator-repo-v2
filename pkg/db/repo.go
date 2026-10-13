@@ -41,6 +41,7 @@ type OperatorRepository interface {
 	UpdateOperator(ctx context.Context, id string, operator lib.Operator, auth string) (err error)
 	PutOperatorVersion(ctx context.Context, id string, version lib.OperatorVersion, auth string) (created bool, err error)
 	DeleteOperatorVersion(ctx context.Context, id string, label string, auth string, check func(lib.OperatorVersion) error) (err error)
+	CheckAdministrate(ctx context.Context, ids []string, auth string) (err error)
 	DeleteOperator(ctx context.Context, id string, auth string) (err error)
 	DeleteOperators(ctx context.Context, ids []string, auth string) (err error)
 	All(ctx context.Context, userId string, admin bool, args map[string][]string, auth string) (response lib.OperatorResponse, err error)
@@ -157,13 +158,43 @@ func (r *MongoRepo) InsertOperator(ctx context.Context, operator lib.Operator) (
 	return
 }
 
-func (r *MongoRepo) DeleteOperator(ctx context.Context, id string, auth string) (err error) {
+// CheckAdministrate fails with lib.ErrMissingRights unless the caller may administrate every id.
+// It is the check DeleteOperator and DeleteOperators make, exposed so that the service can run it
+// before it asks other services about the operators.
+func (r *MongoRepo) CheckAdministrate(ctx context.Context, ids []string, auth string) error {
+	if len(ids) == 1 {
+		return r.checkAdministrateOne(ctx, ids[0], auth)
+	}
+	return r.checkAdministrateMany(ctx, ids, auth)
+}
+
+func (r *MongoRepo) checkAdministrateOne(ctx context.Context, id string, auth string) error {
 	ok, err, _ := r.perm.CheckPermissionContext(ctx, auth, PermV2InstanceTopic, id, permV2Client.Administrate)
 	if err != nil {
 		return err
 	}
 	if !ok {
 		return lib.ErrMissingRights
+	}
+	return nil
+}
+
+func (r *MongoRepo) checkAdministrateMany(ctx context.Context, ids []string, auth string) error {
+	okArr, err, _ := r.perm.CheckMultiplePermissionsContext(ctx, auth, PermV2InstanceTopic, ids, permV2Client.Administrate)
+	if err != nil {
+		return err
+	}
+	for id, ok := range okArr {
+		if !ok {
+			return fmt.Errorf("%w: id %s", lib.ErrMissingRights, id)
+		}
+	}
+	return nil
+}
+
+func (r *MongoRepo) DeleteOperator(ctx context.Context, id string, auth string) (err error) {
+	if err = r.checkAdministrateOne(ctx, id, auth); err != nil {
+		return err
 	}
 
 	objID, err := objectID(id)
@@ -182,14 +213,8 @@ func (r *MongoRepo) DeleteOperator(ctx context.Context, id string, auth string) 
 }
 
 func (r *MongoRepo) DeleteOperators(ctx context.Context, ids []string, auth string) (err error) {
-	okArr, err, _ := r.perm.CheckMultiplePermissionsContext(ctx, auth, PermV2InstanceTopic, ids, permV2Client.Administrate)
-	if err != nil {
+	if err = r.checkAdministrateMany(ctx, ids, auth); err != nil {
 		return err
-	}
-	for id, ok := range okArr {
-		if !ok {
-			return fmt.Errorf("%w: id %s", lib.ErrMissingRights, id)
-		}
 	}
 	// One context for the whole batch: a client that hangs up halfway through must
 	// not leave part of the ids deleted and the rest standing.
