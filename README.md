@@ -22,6 +22,7 @@ environment wins over the file.
 | `MONGO_DATABASE` | `analytics_operator_repo` | Database the `operators` collection lives in |
 | `PERMISSIONS_V2_URL` | `http://permv2.permissions:8080` | Address of permissions-v2. The literal `mock` selects the in-process implementation instead, which needs no server |
 | `FLOW_REPO_URL` | `http://api.analytics-flow-repo:5000` | Address of the flow repository, asked which flows use an operator before it is deleted. The in-cluster service; no path prefix. Empty is refused at startup |
+| `PIPELINE_REGISTRY_URL` | `http://api.analytics-pipeline-service:8000` | Address of the pipeline registry, asked which pipelines run an operator or a version before it is deleted. The in-cluster service; no path prefix. Empty is refused at startup |
 | `HTTP_TIMEOUT` | `30s` | Read and write timeout of the server, as a duration |
 | `URL_PREFIX` | empty | Prefix every route is mounted under, for running behind a gateway that does not strip it |
 | `LOGGER_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
@@ -42,28 +43,35 @@ An empty `PERMISSIONS_V2_URL` is refused at startup rather than accepted: a
 client built for an empty address fails on every request instead, which is a much
 later place to notice a missing value.
 
-## Deleting an operator that flows use
+## Deleting an operator that flows or pipelines use
 
-`DELETE /operator/{id}` and `DELETE /operator` first ask the flow repository
-(`GET /operators/{id}/usage`, with the caller's `Authorization` header) which
-flows use the operator. The flow repository counts the flows of all users and
-lists only those the caller may read.
+`DELETE /operator/{id}` and `DELETE /operator` first ask, for every id and with
+the caller's `Authorization` header, the flow repository
+(`GET /operators/{id}/usage`) which flows use the operator and the pipeline
+registry (`GET /pipeline/statistics/operatorusage/{id}`) which pipelines run it.
+Both count those of all users and list only what the caller may read.
 
-- Used: 409 with `{"error", "flows", "readable": [{"id", "name"}]}`. The batch
-  delete is all or nothing and answers `{"error", "operators": [{"id", "flows",
-  "readable"}]}`, naming each used operator; nothing is deleted.
-- The flow repository cannot be asked (network error, any status but 200, an
-  answer without a count): 502, nothing is deleted.
+- Used by a flow or a pipeline: 409 with `{"error", "flows", "readable":
+  [{"id", "name"}], "pipelines", "readable_pipelines": [{"id", "name"}]}`. The
+  batch delete is all or nothing and answers `{"error", "operators": [{"id",
+  "flows", "readable", "pipelines", "readable_pipelines"}]}`, naming each used
+  operator; nothing is deleted.
+- Either service cannot be asked (network error, any status but 200, an answer
+  without a count or with a negative one): 502 naming the service, nothing is
+  deleted.
 - `?force=true` deletes anyway. It is for administrators only (role `admin` in
   `X-User-Roles`, or in the token when the header is absent); anyone else gets
-  403. The usage is still read, so a forced delete is refused with 502 when the
-  flow repository is down. A forced delete of a used operator is logged at warn
-  with `operator_id`, `user_id` and `flows`.
+  403. The usage is still read, so a forced delete is refused with 502 when either
+  service is down. A forced delete of a used operator is logged at warn with
+  `operator_id`, `user_id`, `flows` and `pipelines`.
 
-The check and the delete are not atomic: a flow saved between them is not seen.
+The check and the delete are not atomic: a flow or pipeline saved between them is
+not seen. Removing a single version follows the same rules, narrowed to the
+version; see [docs/operator-versions.md](docs/operator-versions.md).
 
-`PERMISSIONS_V2_URL=mock go run .` does not mock the flow repository; deletes
-need a reachable `FLOW_REPO_URL` there as well.
+`PERMISSIONS_V2_URL=mock go run .` mocks neither the flow repository nor the
+pipeline registry; deletes need a reachable `FLOW_REPO_URL` and
+`PIPELINE_REGISTRY_URL` there as well.
 
 ## Running it
 

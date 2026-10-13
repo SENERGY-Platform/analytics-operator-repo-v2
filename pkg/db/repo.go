@@ -40,6 +40,7 @@ type OperatorRepository interface {
 	InsertOperator(ctx context.Context, operator lib.Operator) (err error)
 	UpdateOperator(ctx context.Context, id string, operator lib.Operator, auth string) (err error)
 	PutOperatorVersion(ctx context.Context, id string, version lib.OperatorVersion, auth string) (created bool, err error)
+	DeleteOperatorVersion(ctx context.Context, id string, label string, auth string, check func(lib.OperatorVersion) error) (err error)
 	DeleteOperator(ctx context.Context, id string, auth string) (err error)
 	DeleteOperators(ctx context.Context, ids []string, auth string) (err error)
 	All(ctx context.Context, userId string, admin bool, args map[string][]string, auth string) (response lib.OperatorResponse, err error)
@@ -299,6 +300,48 @@ func (r *MongoRepo) applyVersionPut(ctx context.Context, objId bson.ObjectID, st
 		return false, err
 	}
 	return created, nil
+}
+
+// DeleteOperatorVersion removes the version with the label and moves the top level to the newest
+// version left. check gets the version about to be removed after the permission check and before
+// the write; an error from it is returned and nothing is written.
+func (r *MongoRepo) DeleteOperatorVersion(ctx context.Context, id string, label string, auth string, check func(lib.OperatorVersion) error) (err error) {
+	ok, err, _ := r.perm.CheckPermissionContext(ctx, auth, PermV2InstanceTopic, id, permV2Client.Write)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return lib.ErrMissingRights
+	}
+
+	objId, err := objectID(id)
+	if err != nil {
+		return err
+	}
+	stored, err := r.findStored(ctx, objId)
+	if err != nil {
+		return err
+	}
+	return r.applyVersionDelete(ctx, objId, stored, label, check)
+}
+
+// applyVersionDelete is applyVersionPut's counterpart, with the same revision filter.
+func (r *MongoRepo) applyVersionDelete(ctx context.Context, objId bson.ObjectID, stored lib.Operator, label string, check func(lib.OperatorVersion) error) error {
+	versions, removed, err := lib.RemoveVersion(stored.Versions, label)
+	if err != nil {
+		return err
+	}
+	// The check is not atomic with the write: a flow or pipeline created in between is not seen.
+	if err = check(removed); err != nil {
+		return err
+	}
+	newest, _ := lib.NewestVersion(versions)
+	set := bson.M{
+		"versions":    versions,
+		"dateUpdated": time.Now(),
+	}
+	setNewestVersion(set, newest)
+	return r.writeIf(ctx, bson.M{"_id": objId, "version": stored.Version}, set)
 }
 
 func setNewestVersion(set bson.M, newest lib.OperatorVersion) {

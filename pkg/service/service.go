@@ -23,22 +23,30 @@ import (
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/lib"
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/pkg/db"
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/pkg/flowrepo"
+	"github.com/SENERGY-Platform/analytics-operator-repo-v2/pkg/pipelines"
 	"github.com/SENERGY-Platform/analytics-operator-repo-v2/pkg/util"
 	permV2Client "github.com/SENERGY-Platform/permissions-v2/pkg/client"
 )
 
 type Service struct {
-	dbRepo db.OperatorRepository
-	flows  FlowUsage
+	dbRepo    db.OperatorRepository
+	flows     FlowUsage
+	pipelines PipelineUsage
 }
 
-// FlowUsage asks which flows use an operator, with the caller's token.
+// FlowUsage asks which flows use an operator, or only one version of it, with the caller's token.
 type FlowUsage interface {
-	Usage(ctx context.Context, operatorId string, auth string) (lib.OperatorUsage, error)
+	Usage(ctx context.Context, operatorId string, version string, auth string) (lib.OperatorUsage, error)
 }
 
-// DeleteOptions carries what a delete needs besides the ids. Force deletes operators that flows
-// still use; the caller has to have checked that the user may do so.
+// PipelineUsage asks which pipelines run an operator, or only one image of it, with the caller's
+// token.
+type PipelineUsage interface {
+	Usage(ctx context.Context, operatorId string, image string, auth string) (lib.PipelineUsage, error)
+}
+
+// DeleteOptions carries what a delete needs besides the ids. Force deletes operators and versions
+// that flows or pipelines still use; the caller has to have checked that the user may do so.
 type DeleteOptions struct {
 	Force  bool
 	UserId string
@@ -47,10 +55,13 @@ type DeleteOptions struct {
 // New builds the service together with the permissions-v2 client it needs. The
 // client is constructed here rather than handed in, because constructing it can
 // fail: the caller used to discard that error and carry on with a nil client.
-func New(ctx context.Context, permissionsUrl string, flowRepoUrl string, database db.MongoDB) (*Service, error) {
+func New(ctx context.Context, permissionsUrl string, flowRepoUrl string, pipelineRegistryUrl string, database db.MongoDB) (*Service, error) {
+	// Without either every delete would end in a 502; better to fail at startup.
 	if flowRepoUrl == "" {
-		// Without it every delete would end in a 502; better to fail at startup.
 		return nil, fmt.Errorf("no flow repository address configured")
+	}
+	if pipelineRegistryUrl == "" {
+		return nil, fmt.Errorf("no pipeline registry address configured")
 	}
 	perm, err := newPermissionsClient(ctx, permissionsUrl)
 	if err != nil {
@@ -63,7 +74,7 @@ func New(ctx context.Context, permissionsUrl string, flowRepoUrl string, databas
 	if err = dbRepo.ValidateOperatorPermissions(ctx); err != nil {
 		return nil, err
 	}
-	return &Service{dbRepo: dbRepo, flows: flowrepo.New(flowRepoUrl)}, nil
+	return &Service{dbRepo: dbRepo, flows: flowrepo.New(flowRepoUrl), pipelines: pipelines.New(pipelineRegistryUrl)}, nil
 }
 
 // newPermissionsClient returns the client for the configured address. The literal
@@ -108,8 +119,8 @@ func (s *Service) DeleteOperator(ctx context.Context, id string, auth string, op
 	return nil
 }
 
-// DeleteOperators refuses the whole batch when flows use any of the operators, unless opts.Force
-// is set.
+// DeleteOperators refuses the whole batch when flows or pipelines use any of the operators, unless
+// opts.Force is set.
 func (s *Service) DeleteOperators(ctx context.Context, ids []string, auth string, opts DeleteOptions) (err error) {
 	used, err := s.usedBy(ctx, ids, auth, opts)
 	if err != nil {
@@ -122,21 +133,19 @@ func (s *Service) DeleteOperators(ctx context.Context, ids []string, auth string
 	return nil
 }
 
-// usedBy asks the flow repository for every id before anything is deleted, so a refusal deletes
-// nothing. It returns the operators a forced delete goes ahead with, and an *lib.InUseError when
-// there are some and the delete is not forced. Check and delete are not atomic: a flow saved in
-// between is not seen.
+// usedBy asks the flow repository and the pipeline registry for every id before anything is
+// deleted, so a refusal deletes nothing. It returns the operators a forced delete goes ahead with,
+// and an *lib.InUseError when there are some and the delete is not forced. Check and delete are not
+// atomic: a flow or pipeline saved in between is not seen.
 func (s *Service) usedBy(ctx context.Context, ids []string, auth string, opts DeleteOptions) ([]lib.UsedOperator, error) {
 	used := make([]lib.UsedOperator, 0)
 	for _, id := range ids {
-		usage, err := s.flows.Usage(ctx, id, auth)
+		usage, err := s.usage(ctx, id, "", "", auth)
 		if err != nil {
-			// The detail may hold internals and the handler logs the sentinel at error level.
-			util.Logger.WarnContext(ctx, "could not ask the flow repository for the usage of an operator", "operator_id", id, "error", err)
-			return nil, lib.ErrFlowRepoUnavailable
+			return nil, err
 		}
-		if usage.Flows > 0 {
-			used = append(used, lib.UsedOperator{Id: id, OperatorUsage: usage})
+		if usage.InUse() {
+			used = append(used, usage)
 		}
 	}
 	if len(used) > 0 && !opts.Force {
@@ -145,11 +154,57 @@ func (s *Service) usedBy(ctx context.Context, ids []string, auth string, opts De
 	return used, nil
 }
 
+// usage asks both services about the operator. A version label narrows the flows to those that
+// pin it and an image narrows the pipelines to those that run it; empty means the whole operator.
+func (s *Service) usage(ctx context.Context, id string, version string, image string, auth string) (lib.UsedOperator, error) {
+	flows, err := s.flows.Usage(ctx, id, version, auth)
+	if err != nil {
+		// The detail may hold internals and the handler logs the sentinel at error level.
+		util.Logger.WarnContext(ctx, "could not ask the flow repository for the usage of an operator", "operator_id", id, "version", version, "error", err)
+		return lib.UsedOperator{}, lib.ErrFlowRepoUnavailable
+	}
+	pipelineUsage, err := s.pipelines.Usage(ctx, id, image, auth)
+	if err != nil {
+		util.Logger.WarnContext(ctx, "could not ask the pipeline registry for the usage of an operator", "operator_id", id, "image", image, "error", err)
+		return lib.UsedOperator{}, lib.ErrPipelineRegistryUnavailable
+	}
+	return lib.UsedOperator{Id: id, OperatorUsage: flows, PipelineUsage: pipelineUsage}, nil
+}
+
 func logForced(ctx context.Context, used []lib.UsedOperator, opts DeleteOptions) {
 	for _, u := range used {
-		util.Logger.WarnContext(ctx, "deleted an operator that flows still use",
-			"operator_id", u.Id, "user_id", opts.UserId, "flows", u.Flows)
+		util.Logger.WarnContext(ctx, "deleted an operator that flows or pipelines still use",
+			"operator_id", u.Id, "user_id", opts.UserId, "flows", u.Flows, "pipelines", u.Pipelines)
 	}
+}
+
+// DeleteOperatorVersion removes one version of an operator. It needs write permission, which the
+// database layer checks before the usage is asked. The version is refused while flows pin its
+// label or pipelines run its image, unless opts.Force is set.
+func (s *Service) DeleteOperatorVersion(ctx context.Context, id string, label string, auth string, opts DeleteOptions) error {
+	if err := lib.ValidateVersionLabel(label); err != nil {
+		return err
+	}
+	var used lib.UsedOperator
+	err := s.dbRepo.DeleteOperatorVersion(ctx, id, label, auth, func(version lib.OperatorVersion) error {
+		var err error
+		used, err = s.usage(ctx, id, version.Version, version.Image, auth)
+		if err != nil {
+			return err
+		}
+		if used.InUse() && !opts.Force {
+			return &lib.InUseError{Operators: []lib.UsedOperator{used}, Version: version.Version}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if used.InUse() {
+		util.Logger.WarnContext(ctx, "deleted an operator version that flows or pipelines still use",
+			"operator_id", id, "version", label, "user_id", opts.UserId, "flows", used.Flows, "pipelines", used.Pipelines)
+	}
+	return nil
 }
 
 func (s *Service) GetOperators(ctx context.Context, userId string, args map[string][]string, auth string) (response lib.OperatorResponse, err error) {

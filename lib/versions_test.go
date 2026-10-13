@@ -127,6 +127,79 @@ func TestPutVersion(t *testing.T) {
 	}
 }
 
+func TestRemoveVersion(t *testing.T) {
+	v := func(label, image string) OperatorVersion { return OperatorVersion{Version: label, Image: image} }
+	three := func() []OperatorVersion {
+		return []OperatorVersion{v("v1.0.0", "img:1"), v("v1.1.0", "img:2"), v("v2.0.0", "img:3")}
+	}
+
+	removed := []struct {
+		name  string
+		label string
+		want  []string
+	}{
+		{"one in the middle", "v1.1.0", []string{"v1.0.0", "v2.0.0"}},
+		{"the newest", "v2.0.0", []string{"v1.0.0", "v1.1.0"}},
+		{"the oldest", "v1.0.0", []string{"v1.1.0", "v2.0.0"}},
+	}
+	for _, tc := range removed {
+		t.Run("removes "+tc.name, func(t *testing.T) {
+			in := three()
+			out, gone, err := RemoveVersion(in, tc.label)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := labels(out); !slices.Equal(got, tc.want) {
+				t.Errorf("labels = %v, want %v", got, tc.want)
+			}
+			if gone.Version != tc.label || gone.Image == "" {
+				t.Errorf("removed = %+v, want the version labelled %s with its image", gone, tc.label)
+			}
+			if !slices.Equal(labels(in), labels(three())) || in[2].Image != "img:3" {
+				t.Errorf("input changed: %+v", in)
+			}
+		})
+	}
+
+	t.Run("the newest of the rest takes over", func(t *testing.T) {
+		out, _, err := RemoveVersion(three(), "v2.0.0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if newest, _ := NewestVersion(out); newest.Version != "v1.1.0" {
+			t.Errorf("newest = %q, want v1.1.0", newest.Version)
+		}
+	})
+
+	t.Run("refuses the only version", func(t *testing.T) {
+		in := []OperatorVersion{v("v1.0.0", "img:1")}
+		if _, _, err := RemoveVersion(in, "v1.0.0"); !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("err = %v, want ErrInvalidInput", err)
+		}
+		if len(in) != 1 {
+			t.Errorf("input changed: %+v", in)
+		}
+	})
+
+	unknown := []struct {
+		name     string
+		versions []OperatorVersion
+		label    string
+	}{
+		{"an unknown label", three(), "v1.2.0"},
+		{"an unknown label when only one is left", []OperatorVersion{v("v1.0.0", "img:1")}, "v9.0.0"},
+		{"any label of an operator without versions", nil, "v1.0.0"},
+		{"an empty label", three(), ""},
+	}
+	for _, tc := range unknown {
+		t.Run("does not find "+tc.name, func(t *testing.T) {
+			if _, _, err := RemoveVersion(tc.versions, tc.label); !errors.Is(err, ErrVersionNotFound) {
+				t.Errorf("err = %v, want ErrVersionNotFound", err)
+			}
+		})
+	}
+}
+
 func TestNewestVersion(t *testing.T) {
 	v := func(label string, deprecated bool) OperatorVersion {
 		return OperatorVersion{Version: label, Image: "img:" + label, Deprecated: deprecated}

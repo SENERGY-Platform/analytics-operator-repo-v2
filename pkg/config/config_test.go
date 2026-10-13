@@ -32,6 +32,7 @@ var envVars = []string{
 	"DEBUG", "SERVER_PORT", "LOGGER_CONFIG", "LOGGER_LEVEL", "MONGO_URL",
 	"MONGO_USER", "MONGO_PASSWORD", "MONGO_AUTH_SOURCE", "MONGO_DATABASE",
 	"HTTP_TIMEOUT", "PERMISSIONS_V2_URL", "URL_PREFIX", "FLOW_REPO_URL",
+	"PIPELINE_REGISTRY_URL",
 }
 
 func clearEnv(t *testing.T) {
@@ -86,6 +87,10 @@ func TestNewDefaults(t *testing.T) {
 	if cfg.FlowRepoUrl != "http://api.analytics-flow-repo:5000" {
 		t.Errorf("FlowRepoUrl = %q, want http://api.analytics-flow-repo:5000", cfg.FlowRepoUrl)
 	}
+	// The in-cluster service of the pipeline registry.
+	if cfg.PipelineRegistryUrl != "http://api.analytics-pipeline-service:8000" {
+		t.Errorf("PipelineRegistryUrl = %q, want http://api.analytics-pipeline-service:8000", cfg.PipelineRegistryUrl)
+	}
 }
 
 func TestNewEnvOverrides(t *testing.T) {
@@ -97,6 +102,7 @@ func TestNewEnvOverrides(t *testing.T) {
 	t.Setenv("HTTP_TIMEOUT", "5s")
 	t.Setenv("URL_PREFIX", "/analytics-operator-repo")
 	t.Setenv("FLOW_REPO_URL", "http://flow-repo.example:8080")
+	t.Setenv("PIPELINE_REGISTRY_URL", "http://pipelines.example:8000")
 
 	cfg, err := New("")
 	if err != nil {
@@ -117,6 +123,9 @@ func TestNewEnvOverrides(t *testing.T) {
 	}
 	if cfg.FlowRepoUrl != "http://flow-repo.example:8080" {
 		t.Errorf("FlowRepoUrl = %q, want http://flow-repo.example:8080", cfg.FlowRepoUrl)
+	}
+	if cfg.PipelineRegistryUrl != "http://pipelines.example:8000" {
+		t.Errorf("PipelineRegistryUrl = %q, want http://pipelines.example:8000", cfg.PipelineRegistryUrl)
 	}
 }
 

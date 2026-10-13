@@ -47,9 +47,14 @@ func New(baseUrl string) *Client {
 }
 
 // Usage returns the flow repository's answer for the operator, asked with the caller's own token.
-// Any failure, including a non-200 status, is an error: an unknown answer is not "unused".
-func (c *Client) Usage(ctx context.Context, operatorId string, auth string) (usage lib.OperatorUsage, err error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.url+"/operators/"+url.PathEscape(operatorId)+"/usage", nil)
+// A non-empty version narrows it to the flows that pin that version label. Any failure, including
+// a non-200 status, is an error: an unknown answer is not "unused".
+func (c *Client) Usage(ctx context.Context, operatorId string, version string, auth string) (usage lib.OperatorUsage, err error) {
+	target := c.url + "/operators/" + url.PathEscape(operatorId) + "/usage"
+	if version != "" {
+		target += "?" + url.Values{"version": {version}}.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return usage, err
 	}
@@ -74,6 +79,9 @@ func (c *Client) Usage(ctx context.Context, operatorId string, auth string) (usa
 	}
 	if answer.Flows == nil {
 		return usage, errors.New("flow repository answer has no flow count")
+	}
+	if *answer.Flows < 0 {
+		return usage, fmt.Errorf("flow repository answered a negative count %d", *answer.Flows)
 	}
 	usage.Flows = *answer.Flows
 	usage.Readable = answer.Readable

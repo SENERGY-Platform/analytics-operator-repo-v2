@@ -91,7 +91,7 @@ func main() {
 	util.Logger.Debug("connected to database")
 	defer database.Disconnect()
 
-	srv, err := service.New(ctx, cfg.PermissionsV2Url, cfg.FlowRepoUrl, *database)
+	srv, err := service.New(ctx, cfg.PermissionsV2Url, cfg.FlowRepoUrl, cfg.PipelineRegistryUrl, *database)
 	if err != nil {
 		util.Logger.Error("error on new service", "error", err)
 		ec.Store(1)

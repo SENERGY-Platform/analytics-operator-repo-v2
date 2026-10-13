@@ -392,3 +392,166 @@ func TestIntegrationVersionsInTheBodyAreIgnoredOnInsertAndUpdate(t *testing.T) {
 		t.Errorf("after update: versions %v, image %q, want none and the body's image", versionLabels(op), op.Image)
 	}
 }
+
+// noUse is a check that lets every removal through and counts its calls.
+func noUse(calls *[]string) func(lib.OperatorVersion) error {
+	return func(v lib.OperatorVersion) error {
+		*calls = append(*calls, v.Version+" "+v.Image)
+		return nil
+	}
+}
+
+func TestIntegrationDeleteOperatorVersion(t *testing.T) {
+	repo, coll := testRepo(t)
+	insert(t, repo, "user-a", "alpha")
+	id := idOf(t, coll, "alpha")
+	owner := userToken(t, "user-a")
+	in := lib.Value{Name: "in", Type: "string"}
+	v1 := versionOf("v1.0.0", "img:1", in)
+	v2 := versionOf("v1.1.0", "img:2", in)
+	v3 := versionOf("v2.0.0", "img:3", in)
+	for _, v := range []lib.OperatorVersion{v1, v2, v3} {
+		if _, err := repo.PutOperatorVersion(t.Context(), id, v, owner); err != nil {
+			t.Fatalf("put %s: %v", v.Version, err)
+		}
+	}
+
+	refusals := []struct {
+		name  string
+		label string
+		auth  string
+		want  error
+	}{
+		{"another user, before the check", "v1.0.0", userToken(t, "user-b"), lib.ErrMissingRights},
+		{"an unknown label", "v1.2.0", owner, lib.ErrVersionNotFound},
+	}
+	for _, tc := range refusals {
+		t.Run("refuses "+tc.name, func(t *testing.T) {
+			before := readOperator(t, repo, id, "user-a")
+			var calls []string
+			err := repo.DeleteOperatorVersion(t.Context(), id, tc.label, tc.auth, noUse(&calls))
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("error = %v, want %v", err, tc.want)
+			}
+			if len(calls) != 0 {
+				t.Errorf("check called with %v", calls)
+			}
+			after := readOperator(t, repo, id, "user-a")
+			requireRevision(t, after, *before.Version)
+		})
+	}
+
+	t.Run("a refusing check writes nothing", func(t *testing.T) {
+		before := readOperator(t, repo, id, "user-a")
+		inUse := &lib.InUseError{Version: "v2.0.0"}
+		err := repo.DeleteOperatorVersion(t.Context(), id, "v2.0.0", owner, func(lib.OperatorVersion) error { return inUse })
+		if !errors.Is(err, inUse) {
+			t.Fatalf("error = %v, want the check's", err)
+		}
+		after := readOperator(t, repo, id, "user-a")
+		requireRevision(t, after, *before.Version)
+		if !slices.Equal(versionLabels(after), []string{"v1.0.0", "v1.1.0", "v2.0.0"}) {
+			t.Errorf("versions = %v", versionLabels(after))
+		}
+	})
+
+	t.Run("removing the newest moves the top level to the next", func(t *testing.T) {
+		before := readOperator(t, repo, id, "user-a")
+		requireTopLevel(t, before, v3)
+		var calls []string
+		if err := repo.DeleteOperatorVersion(t.Context(), id, "v2.0.0", owner, noUse(&calls)); err != nil {
+			t.Fatalf("delete: %v", err)
+		}
+		if !slices.Equal(calls, []string{"v2.0.0 img:3"}) {
+			t.Errorf("check called with %v, want the removed version and its image", calls)
+		}
+		after := readOperator(t, repo, id, "user-a")
+		requireTopLevel(t, after, v2)
+		requireRevision(t, after, *before.Version+1)
+		if !slices.Equal(versionLabels(after), []string{"v1.0.0", "v1.1.0"}) {
+			t.Errorf("versions = %v", versionLabels(after))
+		}
+	})
+
+	t.Run("removing an older one keeps the top level", func(t *testing.T) {
+		var calls []string
+		if err := repo.DeleteOperatorVersion(t.Context(), id, "v1.0.0", owner, noUse(&calls)); err != nil {
+			t.Fatalf("delete: %v", err)
+		}
+		after := readOperator(t, repo, id, "user-a")
+		requireTopLevel(t, after, v2)
+		if !slices.Equal(versionLabels(after), []string{"v1.1.0"}) {
+			t.Errorf("versions = %v", versionLabels(after))
+		}
+	})
+
+	t.Run("the only version is refused before the check", func(t *testing.T) {
+		var calls []string
+		err := repo.DeleteOperatorVersion(t.Context(), id, "v1.1.0", owner, noUse(&calls))
+		if !errors.Is(err, lib.ErrInvalidInput) {
+			t.Fatalf("error = %v, want ErrInvalidInput", err)
+		}
+		if len(calls) != 0 {
+			t.Errorf("check called with %v", calls)
+		}
+		if got := versionLabels(readOperator(t, repo, id, "user-a")); !slices.Equal(got, []string{"v1.1.0"}) {
+			t.Errorf("versions = %v", got)
+		}
+	})
+
+	t.Run("a removed image can be used by a new version again", func(t *testing.T) {
+		if _, err := repo.PutOperatorVersion(t.Context(), id, versionOf("v3.0.0", "img:3", in), owner); err != nil {
+			t.Errorf("put with the image of the removed version: %v", err)
+		}
+	})
+
+	t.Run("rights held but document gone is a 404", func(t *testing.T) {
+		if _, err := coll.DeleteOne(context.Background(), bson.M{"_id": mustObjectID(t, id)}); err != nil {
+			t.Fatalf("delete document: %v", err)
+		}
+		var calls []string
+		if err := repo.DeleteOperatorVersion(t.Context(), id, "v1.1.0", owner, noUse(&calls)); !errors.Is(err, lib.ErrNotFound) {
+			t.Errorf("error = %v, want ErrNotFound", err)
+		}
+	})
+}
+
+// Two removals that each leave one version must not both go through and leave none.
+func TestIntegrationConcurrentVersionDeletesKeepOneVersion(t *testing.T) {
+	repo, coll := testRepo(t)
+	insert(t, repo, "user-a", "alpha")
+	id := idOf(t, coll, "alpha")
+	owner := userToken(t, "user-a")
+	v1 := versionOf("v1.0.0", "img:1")
+	v2 := versionOf("v1.1.0", "img:2")
+	for _, v := range []lib.OperatorVersion{v1, v2} {
+		if _, err := repo.PutOperatorVersion(t.Context(), id, v, owner); err != nil {
+			t.Fatalf("put %s: %v", v.Version, err)
+		}
+	}
+	stale := readOperator(t, repo, id, "user-a")
+	var calls []string
+	if err := repo.DeleteOperatorVersion(t.Context(), id, "v1.1.0", owner, noUse(&calls)); err != nil {
+		t.Fatalf("first delete: %v", err)
+	}
+	current := readOperator(t, repo, id, "user-a")
+
+	err := repo.applyVersionDelete(t.Context(), mustObjectID(t, id), stale, "v1.0.0", noUse(&calls))
+
+	if !errors.Is(err, lib.ErrConflict) {
+		t.Fatalf("error = %v, want ErrConflict", err)
+	}
+	after := readOperator(t, repo, id, "user-a")
+	requireRevision(t, after, *current.Version)
+	requireTopLevel(t, after, v1)
+	if !slices.Equal(versionLabels(after), []string{"v1.0.0"}) {
+		t.Errorf("versions = %v, want v1.0.0 left", versionLabels(after))
+	}
+
+	if _, err = coll.DeleteOne(context.Background(), bson.M{"_id": mustObjectID(t, id)}); err != nil {
+		t.Fatalf("delete document: %v", err)
+	}
+	if err = repo.applyVersionDelete(t.Context(), mustObjectID(t, id), stale, "v1.0.0", noUse(&calls)); !errors.Is(err, lib.ErrNotFound) {
+		t.Errorf("after the operator was deleted: error = %v, want ErrNotFound", err)
+	}
+}

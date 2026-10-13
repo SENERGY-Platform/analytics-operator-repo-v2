@@ -19,27 +19,51 @@ package flowrepo
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 )
 
 func TestUsageAsksWithTheCallersTokenAndParsesTheAnswer(t *testing.T) {
-	var gotPath, gotAuth, gotMethod string
+	var gotPath, gotQuery, gotAuth, gotMethod string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath, gotAuth, gotMethod = r.URL.EscapedPath(), r.Header.Get("Authorization"), r.Method
+		gotPath, gotQuery, gotAuth, gotMethod = r.URL.EscapedPath(), r.URL.RawQuery, r.Header.Get("Authorization"), r.Method
 		_, _ = w.Write([]byte(`{"flows":3,"readable":[{"id":"f1","name":"one"}]}`))
 	}))
 	t.Cleanup(srv.Close)
 
 	// A trailing slash on the configured address must not double up.
-	usage, err := New(srv.URL+"/").Usage(t.Context(), "op/1", "Bearer token-a")
+	usage, err := New(srv.URL+"/").Usage(t.Context(), "op/1", "", "Bearer token-a")
 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotMethod != http.MethodGet || gotPath != "/operators/op%2F1/usage" || gotAuth != "Bearer token-a" {
-		t.Errorf("request = %s %s with %q", gotMethod, gotPath, gotAuth)
+	// Without a version the whole operator is asked for, so no query at all.
+	if gotMethod != http.MethodGet || gotPath != "/operators/op%2F1/usage" || gotQuery != "" || gotAuth != "Bearer token-a" {
+		t.Errorf("request = %s %s?%s with %q", gotMethod, gotPath, gotQuery, gotAuth)
 	}
 	if usage.Flows != 3 || len(usage.Readable) != 1 || usage.Readable[0].Id != "f1" || usage.Readable[0].Name != "one" {
+		t.Errorf("usage = %+v", usage)
+	}
+}
+
+func TestUsageWithAVersionAsksForThatVersionOnly(t *testing.T) {
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		_, _ = w.Write([]byte(`{"flows":1,"readable":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	// A label is never this, but the parameter has to arrive as given whatever it holds.
+	usage, err := New(srv.URL).Usage(t.Context(), "op-1", "v1.2.3&x=y", "Bearer a")
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gotQuery) != 1 || gotQuery.Get("version") != "v1.2.3&x=y" {
+		t.Errorf("query = %v, want only version=v1.2.3&x=y", gotQuery)
+	}
+	if usage.Flows != 1 {
 		t.Errorf("usage = %+v", usage)
 	}
 }
@@ -50,7 +74,7 @@ func TestUsageOfAnUnusedOperatorHasAnEmptyReadableList(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	usage, err := New(srv.URL).Usage(t.Context(), "op-1", "")
+	usage, err := New(srv.URL).Usage(t.Context(), "op-1", "", "")
 
 	if err != nil {
 		t.Fatal(err)
@@ -74,6 +98,7 @@ func TestUsageFailsOnAnythingButACompleteAnswer(t *testing.T) {
 		{"ok with an empty object", http.StatusOK, `{}`},
 		{"ok with html from a proxy", http.StatusOK, `<html>maintenance</html>`},
 		{"ok with an empty body", http.StatusOK, ``},
+		{"ok with a negative count", http.StatusOK, `{"flows":-1,"readable":[]}`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -83,7 +108,7 @@ func TestUsageFailsOnAnythingButACompleteAnswer(t *testing.T) {
 			}))
 			t.Cleanup(srv.Close)
 
-			if usage, err := New(srv.URL).Usage(t.Context(), "op-1", "Bearer a"); err == nil {
+			if usage, err := New(srv.URL).Usage(t.Context(), "op-1", "", "Bearer a"); err == nil {
 				t.Errorf("no error, usage = %+v", usage)
 			}
 		})
@@ -92,10 +117,10 @@ func TestUsageFailsOnAnythingButACompleteAnswer(t *testing.T) {
 
 func TestUsageFailsWhenTheFlowRepoIsDown(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
-	url := srv.URL
+	addr := srv.URL
 	srv.Close()
 
-	if _, err := New(url).Usage(t.Context(), "op-1", "Bearer a"); err == nil {
+	if _, err := New(addr).Usage(t.Context(), "op-1", "", "Bearer a"); err == nil {
 		t.Error("no error for a refused connection")
 	}
 }

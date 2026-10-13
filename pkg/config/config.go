@@ -37,6 +37,9 @@ type Config struct {
 	URLPrefix        string                 `json:"url_prefix" env_var:"URL_PREFIX"`
 	// FlowRepoUrl is asked before an operator is deleted, to see whether flows use it.
 	FlowRepoUrl string `json:"flow_repo_url" env_var:"FLOW_REPO_URL"`
+	// PipelineRegistryUrl is asked before an operator or a version is deleted, to see whether
+	// pipelines run it.
+	PipelineRegistryUrl string `json:"pipeline_registry_url" env_var:"PIPELINE_REGISTRY_URL"`
 	// OtelEndpoint is the OTLP collector traces are exported to. Empty means the
 	// in-cluster Jaeger the otelx default names, which is what every deployment
 	// uses; it is set explicitly only to export somewhere else.
@@ -49,19 +52,20 @@ type LoggerConfig struct {
 
 func New(path string) (*Config, error) {
 	cfg := Config{
-		ServerPort:       8000,
-		MongoUrl:         "mongodb://localhost:27017",
-		MongoUser:        "",
-		MongoPassword:    "",
-		MongoAuthSource:  "admin",
-		MongoDatabase:    "analytics_operator_repo",
-		Debug:            false,
-		Logger:           LoggerConfig{Level: "info"},
-		HttpTimeout:      30 * time.Second,
-		PermissionsV2Url: "http://permv2.permissions:8080",
-		URLPrefix:        "",
-		FlowRepoUrl:      "http://api.analytics-flow-repo:5000",
-		OtelEndpoint:     "",
+		ServerPort:          8000,
+		MongoUrl:            "mongodb://localhost:27017",
+		MongoUser:           "",
+		MongoPassword:       "",
+		MongoAuthSource:     "admin",
+		MongoDatabase:       "analytics_operator_repo",
+		Debug:               false,
+		Logger:              LoggerConfig{Level: "info"},
+		HttpTimeout:         30 * time.Second,
+		PermissionsV2Url:    "http://permv2.permissions:8080",
+		URLPrefix:           "",
+		FlowRepoUrl:         "http://api.analytics-flow-repo:5000",
+		PipelineRegistryUrl: "http://api.analytics-pipeline-service:8000",
+		OtelEndpoint:        "",
 	}
 	err := sb_config_hdl.Load(&cfg, nil, envTypeParser, nil, path)
 	return &cfg, err

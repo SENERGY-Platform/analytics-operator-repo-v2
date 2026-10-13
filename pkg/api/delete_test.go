@@ -39,7 +39,11 @@ func TestStatusCodeOfTheDeleteGuard(t *testing.T) {
 	}{
 		{"in use", &lib.InUseError{}, http.StatusConflict},
 		{"in use, wrapped", fmt.Errorf("delete: %w", &lib.InUseError{}), http.StatusConflict},
+		{"version in use", &lib.InUseError{Version: "v1.0.0"}, http.StatusConflict},
 		{"flow repository unavailable", lib.ErrFlowRepoUnavailable, http.StatusBadGateway},
+		{"pipeline registry unavailable", lib.ErrPipelineRegistryUnavailable, http.StatusBadGateway},
+		{"pipeline registry unavailable, wrapped", fmt.Errorf("delete: %w", lib.ErrPipelineRegistryUnavailable), http.StatusBadGateway},
+		{"version not found", lib.ErrVersionNotFound, http.StatusNotFound},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -169,24 +173,60 @@ func failedDelete(t *testing.T, err error, batch bool) *httptest.ResponseRecorde
 }
 
 func TestDeleteFailedBodyOfASingleRefusal(t *testing.T) {
-	err := &lib.InUseError{Operators: []lib.UsedOperator{{
+	usage := lib.UsedOperator{
 		Id:            "op-1",
 		OperatorUsage: lib.OperatorUsage{Flows: 3, Readable: []lib.FlowRef{{Id: "f1", Name: "one"}}},
+		PipelineUsage: lib.PipelineUsage{Pipelines: 2, ReadablePipelines: []lib.PipelineRef{{Id: "p1", Name: "pipe"}}},
+	}
+	tests := []struct {
+		name      string
+		err       *lib.InUseError
+		wantError string
+	}{
+		{"operator", &lib.InUseError{Operators: []lib.UsedOperator{usage}}, "operator is still used by flows or pipelines"},
+		{"version", &lib.InUseError{Operators: []lib.UsedOperator{usage}, Version: "v1.0.0"}, "version is still used by flows or pipelines"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := failedDelete(t, tc.err, false)
+
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("status = %d, want 409", rec.Code)
+			}
+			var body map[string]json.RawMessage
+			if e := json.Unmarshal(rec.Body.Bytes(), &body); e != nil {
+				t.Fatalf("body %q: %v", rec.Body.String(), e)
+			}
+			// The keys of the flow-only body keep their meaning; the pipeline keys come on top.
+			want := map[string]string{
+				"error":              `"` + tc.wantError + `"`,
+				"flows":              `3`,
+				"readable":           `[{"id":"f1","name":"one"}]`,
+				"pipelines":          `2`,
+				"readable_pipelines": `[{"id":"p1","name":"pipe"}]`,
+			}
+			if len(body) != len(want) {
+				t.Errorf("body %s has keys other than %v", rec.Body.String(), want)
+			}
+			for key, value := range want {
+				if string(body[key]) != value {
+					t.Errorf("%s = %s, want %s", key, body[key], value)
+				}
+			}
+		})
+	}
+}
+
+func TestDeleteFailedBodyOfAnUnusedListIsEmptyNotNull(t *testing.T) {
+	err := &lib.InUseError{Operators: []lib.UsedOperator{{
+		Id:            "op-1",
+		OperatorUsage: lib.OperatorUsage{Flows: 0, Readable: []lib.FlowRef{}},
+		PipelineUsage: lib.PipelineUsage{Pipelines: 4, ReadablePipelines: []lib.PipelineRef{}},
 	}}}
 
 	rec := failedDelete(t, err, false)
 
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409", rec.Code)
-	}
-	var body lib.InUseResponse
-	if e := json.Unmarshal(rec.Body.Bytes(), &body); e != nil {
-		t.Fatalf("body %q: %v", rec.Body.String(), e)
-	}
-	if body.Error == "" || body.Flows != 3 || len(body.Readable) != 1 || body.Readable[0].Name != "one" {
-		t.Errorf("body = %+v", body)
-	}
-	for _, key := range []string{`"error"`, `"flows"`, `"readable"`} {
+	for _, key := range []string{`"readable":[]`, `"readable_pipelines":[]`, `"flows":0`, `"pipelines":4`} {
 		if !strings.Contains(rec.Body.String(), key) {
 			t.Errorf("body %s lacks %s", rec.Body.String(), key)
 		}
@@ -196,7 +236,8 @@ func TestDeleteFailedBodyOfASingleRefusal(t *testing.T) {
 func TestDeleteFailedBodyOfABatchRefusalNamesEachUsedOperator(t *testing.T) {
 	err := &lib.InUseError{Operators: []lib.UsedOperator{
 		{Id: "op-1", OperatorUsage: lib.OperatorUsage{Flows: 1, Readable: []lib.FlowRef{}}},
-		{Id: "op-3", OperatorUsage: lib.OperatorUsage{Flows: 2, Readable: []lib.FlowRef{{Id: "f", Name: "n"}}}},
+		{Id: "op-3", OperatorUsage: lib.OperatorUsage{Flows: 2, Readable: []lib.FlowRef{{Id: "f", Name: "n"}}},
+			PipelineUsage: lib.PipelineUsage{Pipelines: 1, ReadablePipelines: []lib.PipelineRef{{Id: "p", Name: "q"}}}},
 	}}
 
 	rec := failedDelete(t, err, true)
@@ -209,19 +250,34 @@ func TestDeleteFailedBodyOfABatchRefusalNamesEachUsedOperator(t *testing.T) {
 		t.Fatalf("body %q: %v", rec.Body.String(), e)
 	}
 	if body.Error == "" || len(body.Operators) != 2 || body.Operators[0].Id != "op-1" || body.Operators[1].Id != "op-3" ||
-		body.Operators[1].Flows != 2 || len(body.Operators[1].Readable) != 1 {
+		body.Operators[1].Flows != 2 || len(body.Operators[1].Readable) != 1 ||
+		body.Operators[1].Pipelines != 1 || len(body.Operators[1].ReadablePipelines) != 1 || body.Operators[1].ReadablePipelines[0].Name != "q" {
 		t.Errorf("body = %+v", body)
+	}
+	if !strings.Contains(rec.Body.String(), `"readable_pipelines":[{"id":"p","name":"q"}]`) {
+		t.Errorf("body %s lacks the pipelines of op-3", rec.Body.String())
 	}
 }
 
-func TestDeleteFailedWithUnreachableFlowRepoIsBadGateway(t *testing.T) {
-	rec := failedDelete(t, lib.ErrFlowRepoUnavailable, false)
-
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502 (body %q)", rec.Code, rec.Body.String())
+func TestDeleteFailedWithAnUnreachableServiceIsBadGatewayNamingIt(t *testing.T) {
+	tests := []struct {
+		err   error
+		names string
+	}{
+		{lib.ErrFlowRepoUnavailable, "flow repository"},
+		{lib.ErrPipelineRegistryUnavailable, "pipeline registry"},
 	}
-	if !strings.Contains(rec.Body.String(), lib.ErrFlowRepoUnavailable.Error()) {
-		t.Errorf("body = %q, want the message", rec.Body.String())
+	for _, tc := range tests {
+		t.Run(tc.names, func(t *testing.T) {
+			rec := failedDelete(t, tc.err, false)
+
+			if rec.Code != http.StatusBadGateway {
+				t.Fatalf("status = %d, want 502 (body %q)", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tc.err.Error()) || !strings.Contains(rec.Body.String(), tc.names) {
+				t.Errorf("body = %q, want the message naming the %s", rec.Body.String(), tc.names)
+			}
+		})
 	}
 }
 

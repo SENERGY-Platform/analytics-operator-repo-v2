@@ -272,8 +272,14 @@ func createOperators(t *testing.T, engine *gin.Engine, names ...string) {
 // stub would answer for them itself.
 func testEngine(t *testing.T) *gin.Engine {
 	t.Helper()
+	return testEngineWith(t, "http://flow-repo.invalid", "http://pipelines.invalid")
+}
+
+// testEngineWith is testEngine with the addresses the usage is asked at before a delete.
+func testEngineWith(t *testing.T, flowRepoUrl string, pipelineRegistryUrl string) *gin.Engine {
+	t.Helper()
 	database := testDatabase(t)
-	srv, err := service.New(t.Context(), "mock", "http://flow-repo.invalid", *database)
+	srv, err := service.New(t.Context(), "mock", flowRepoUrl, pipelineRegistryUrl, *database)
 	if err != nil {
 		t.Fatalf("build service: %v", err)
 	}

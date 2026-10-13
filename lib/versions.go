@@ -89,6 +89,19 @@ func PutVersion(versions []OperatorVersion, v OperatorVersion) (result []Operato
 	return result, created, nil
 }
 
+// RemoveVersion returns versions without the one labelled label, and that one. An operator keeps
+// at least one version, so removing the only one is refused. The input slice is not modified.
+func RemoveVersion(versions []OperatorVersion, label string) (result []OperatorVersion, removed OperatorVersion, err error) {
+	i := slices.IndexFunc(versions, func(v OperatorVersion) bool { return v.Version == label })
+	if i < 0 {
+		return nil, removed, ErrVersionNotFound
+	}
+	if len(versions) == 1 {
+		return nil, removed, fmt.Errorf("%w: an operator keeps at least one version; delete the operator instead", ErrInvalidInput)
+	}
+	return slices.Delete(slices.Clone(versions), i, i+1), versions[i], nil
+}
+
 // NewestVersion is the highest version that is not deprecated, or the highest overall when
 // all are deprecated. ok is false for an empty list.
 func NewestVersion(versions []OperatorVersion) (newest OperatorVersion, ok bool) {

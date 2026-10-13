@@ -203,13 +203,53 @@ func putOperatorVersionHandler(put versionPutter) gin.HandlerFunc {
 	}
 }
 
-// deleteOperator godoc
-// @Summary Delete operator
-// @Description	Deletes an operator. Refused with 409 while flows use it, unless an administrator passes force. Answers 502 when the flow repository cannot be asked; nothing is deleted then.
+// deleteOperatorVersion godoc
+// @Summary Delete operator version
+// @Description	Removes one version of an operator; needs write permission. The top-level image, inputs, outputs and config_values move to the newest version left. The only version of an operator cannot be removed (400); delete the operator instead. Refused with 409 and the usage in the body while flows pin the label or pipelines run the version's image, unless an administrator passes force. Answers 502 when the flow repository or the pipeline registry cannot be asked, and 409 without a body when the operator was changed concurrently; nothing is deleted then and the request can be repeated.
 // @Tags Operator
 // @Produce json
 // @Param id path string true "Operator ID"
-// @Param force query bool false "Administrators only: delete although flows still use the operator" default(false)
+// @Param version path string true "Version label, vMAJOR.MINOR.PATCH" example(v1.2.0)
+// @Param force query bool false "Administrators only: delete although flows or pipelines still use the version" default(false)
+// @Success	204
+// @Failure	400 {string} str
+// @Failure	403 {string} str
+// @Failure	404 {string} str
+// @Failure	409 {object} lib.InUseResponse
+// @Failure	500 {string} str
+// @Failure	502 {string} str
+// @Router /operator/{id}/versions/{version} [delete]
+func deleteOperatorVersion(srv service.Service) (string, string, gin.HandlerFunc) {
+	return http.MethodDelete, "/operator/:id/versions/:version", deleteOperatorVersionHandler(srv.DeleteOperatorVersion)
+}
+
+// versionDeleter is the part of the service the version delete handler calls.
+type versionDeleter func(ctx context.Context, id string, label string, auth string, opts service.DeleteOptions) error
+
+func deleteOperatorVersionHandler(del versionDeleter) gin.HandlerFunc {
+	return func(gc *gin.Context) {
+		opts, err := deleteOptions(gc)
+		if err != nil {
+			logError(gc.Request.Context(), "error deleting operator version", err)
+			_ = gc.Error(safeError(err))
+			return
+		}
+		err = del(gc.Request.Context(), gc.Param("id"), gc.Param("version"), gc.GetHeader("Authorization"), opts)
+		if err != nil {
+			deleteFailed(gc, "error deleting operator version", err, false)
+			return
+		}
+		gc.Status(http.StatusNoContent)
+	}
+}
+
+// deleteOperator godoc
+// @Summary Delete operator
+// @Description	Deletes an operator. Refused with 409 while flows or pipelines use it, unless an administrator passes force. Answers 502 when the flow repository or the pipeline registry cannot be asked; nothing is deleted then.
+// @Tags Operator
+// @Produce json
+// @Param id path string true "Operator ID"
+// @Param force query bool false "Administrators only: delete although flows or pipelines still use the operator" default(false)
 // @Success	204
 // @Failure	400 {string} str
 // @Failure	403 {string} str
@@ -245,8 +285,8 @@ func deleteOperatorHandler(srv service.Service) gin.HandlerFunc {
 	}
 }
 
-// deleteOptions reads ?force from the request. Force skips the check for flows that use the
-// operator, so it is for administrators only.
+// deleteOptions reads ?force from the request. Force skips the check for flows and pipelines that
+// use the operator, so it is for administrators only.
 func deleteOptions(gc *gin.Context) (service.DeleteOptions, error) {
 	opts := service.DeleteOptions{UserId: gc.GetString(UserIdKey)}
 	raw := gc.Query("force")
@@ -264,8 +304,8 @@ func deleteOptions(gc *gin.Context) (service.DeleteOptions, error) {
 	return opts, nil
 }
 
-// deleteFailed answers a failed delete. A refusal because flows use the operators carries their
-// usage in the body, which the error handler would reduce to text.
+// deleteFailed answers a failed delete. A refusal because flows or pipelines use the operators
+// carries their usage in the body, which the error handler would reduce to text.
 func deleteFailed(gc *gin.Context, msg string, err error, batch bool) {
 	logError(gc.Request.Context(), msg, err)
 	var inUse *lib.InUseError
@@ -277,17 +317,18 @@ func deleteFailed(gc *gin.Context, msg string, err error, batch bool) {
 		gc.JSON(http.StatusConflict, lib.InUseBatchResponse{Error: inUse.Error(), Operators: inUse.Operators})
 		return
 	}
-	gc.JSON(http.StatusConflict, lib.InUseResponse{Error: inUse.Error(), OperatorUsage: inUse.Operators[0].OperatorUsage})
+	used := inUse.Operators[0]
+	gc.JSON(http.StatusConflict, lib.InUseResponse{Error: inUse.Error(), OperatorUsage: used.OperatorUsage, PipelineUsage: used.PipelineUsage})
 }
 
 // deleteOperators godoc
 // @Summary Delete multiple operators
-// @Description	Deletes multiple operators, all or none. Refused with 409 naming each used operator while flows use any of them, unless an administrator passes force. Answers 502 when the flow repository cannot be asked; nothing is deleted then.
+// @Description	Deletes multiple operators, all or none. Refused with 409 naming each used operator while flows or pipelines use any of them, unless an administrator passes force. Answers 502 when the flow repository or the pipeline registry cannot be asked; nothing is deleted then.
 // @Tags Operator
 // @Accept json
 // @Produce json
 // @Param request body []string true "ID list"
-// @Param force query bool false "Administrators only: delete although flows still use operators of the list" default(false)
+// @Param force query bool false "Administrators only: delete although flows or pipelines still use operators of the list" default(false)
 // @Success	204
 // @Failure	400 {string} str
 // @Failure	403 {string} str

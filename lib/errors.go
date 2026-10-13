@@ -29,6 +29,8 @@ var (
 	ErrMissingRights = errors.New("requested instance nonexistent or missing rights")
 	// ErrNotFound means the permission check passed but the document is gone.
 	ErrNotFound = errors.New("operator not found")
+	// ErrVersionNotFound means the operator exists but has no version with the label.
+	ErrVersionNotFound = errors.New("operator version not found")
 	// ErrConflict means the operator was written between this request's read and
 	// its write; the caller can repeat the request.
 	ErrConflict = errors.New("operator was changed concurrently, retry")
